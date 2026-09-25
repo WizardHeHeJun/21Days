@@ -63,6 +63,14 @@ namespace Game.Dialogue
         private float characterProgress;
         private float lastChoiceRefresh;
         private bool[] availability;
+        // 当前显示的选项行（顺序同界面，隐藏的不可用选项不在其中）：可用性与选项 id，供数字键按行号选择。
+        private readonly List<bool> choiceRowAvailable = new List<bool>(4);
+        private readonly List<string> choiceRowIds = new List<string>(4);
+        // 按钮上的键位提示（由 DialogueKeyboardInput 首次拿到动作集时传入），打开面板时交给 View。
+        private string autoKeyHint = string.Empty;
+        private string speedKeyHint = string.Empty;
+        private string skipKeyHint = string.Empty;
+        private string historyKeyHint = string.Empty;
 
         public DialogueController(DialogueRules rules, DialogueCatalog catalog, IUIService ui, IAssetService assets,
             IClock clock, ITelemetryScope telemetry)
@@ -108,6 +116,7 @@ namespace Game.Dialogue
                 view.OnAuto += ToggleAuto;
                 view.OnSpeed += CycleSpeed;
                 view.OnSkip += RequestSkip;
+                view.SetKeyHints(autoKeyHint, speedKeyHint, skipKeyHint, historyKeyHint);
                 long visit = -1;
                 while (generation == rules.Generation && rules.Phase != DialogueSaveData.Phase.Completed &&
                     rules.Phase != DialogueSaveData.Phase.Closed)
@@ -144,6 +153,7 @@ namespace Game.Dialogue
                         await ui.CloseAsync(history, ct);
                         history = null;
                         historyOpen = false;
+                        view.SelectChoice(); // 面板关掉后把选中还给选项（没有选项时 View 忽略）
                     }
                     if (skipConfirmRequested && !Suspended)
                     {
@@ -168,6 +178,7 @@ namespace Game.Dialogue
                         skipConfirm = null;
                         skipConfirmOpen = false;
                         if (confirmed) policy.BeginSkip();
+                        view.SelectChoice(); // 弹窗关掉后把选中还给选项（没有选项时 View 忽略）
                     }
                     if (!Suspended && !Overlaid)
                     {
@@ -221,6 +232,8 @@ namespace Game.Dialogue
                     foreach (AssetHandle<Sprite> handle in handles) handle?.Dispose();
                     Array.Clear(handles, 0, handles.Length);
                     ReleaseChoiceIcons();
+                    choiceRowAvailable.Clear();
+                    choiceRowIds.Clear();
                     view = null;
                     history = null;
                     skipConfirm = null;
@@ -243,6 +256,46 @@ namespace Game.Dialogue
             rules.Apply(in intent, conditions.Snapshot(targetId));
             if (rules.Visit != visit || rules.Phase == DialogueSaveData.Phase.Completed) ready = false;
             else RefreshChoices(true);
+        }
+
+        /// <summary>
+        /// 键位提示（按钮文字后缀，如「A」「S」「Ctrl」「H」）；空串表示不显示。展示中调用会立即刷新当前面板。
+        /// </summary>
+        public void SetKeyHints(string autoKey, string speedKey, string skipKey, string historyKey)
+        {
+            autoKeyHint = autoKey ?? string.Empty;
+            speedKeyHint = speedKey ?? string.Empty;
+            skipKeyHint = skipKey ?? string.Empty;
+            historyKeyHint = historyKey ?? string.Empty;
+            if (view != null) view.SetKeyHints(autoKeyHint, speedKeyHint, skipKeyHint, historyKeyHint);
+        }
+
+        /// <summary>键位映射用的状态快照；未展示时 <c>Active</c> 为 false。</summary>
+        internal DialogueKeyboardInput.State KeyState => new DialogueKeyboardInput.State(
+            running && !Suspended, ready, running && rules.Phase == DialogueSaveData.Phase.AwaitChoice,
+            historyOpen, skipConfirmOpen, choiceRowAvailable);
+
+        /// <summary>
+        /// 处理一次按键：经 <see cref="DialogueKeyboardInput.Map"/> 判定后，调用与点击完全相同的处理函数
+        /// （推进 = 点对话框 <see cref="Tap"/>，自动 / 倍速 / 跳过 / 历史 = 点对应按钮，数字键 = 点第 N 行选项）。
+        /// </summary>
+        internal void HandleKey(DialogueKeyboardInput.Key key)
+        {
+            DialogueKeyboardInput.Command command = DialogueKeyboardInput.Map(key, KeyState);
+            switch (command.Kind)
+            {
+                case DialogueKeyboardInput.CommandKind.Tap: Tap(); break;
+                case DialogueKeyboardInput.CommandKind.ToggleAuto: ToggleAuto(); break;
+                case DialogueKeyboardInput.CommandKind.CycleSpeed: CycleSpeed(); break;
+                case DialogueKeyboardInput.CommandKind.RequestSkip: RequestSkip(); break;
+                case DialogueKeyboardInput.CommandKind.OpenHistory: RequestHistory(); break;
+                case DialogueKeyboardInput.CommandKind.CloseHistory: DismissHistory(); break;
+                case DialogueKeyboardInput.CommandKind.CancelSkip: CancelSkip(); break;
+                case DialogueKeyboardInput.CommandKind.Choose:
+                    Submit(new DialogueIntent(DialogueIntent.Action.Choose, rules.Generation, rules.Visit,
+                        choiceRowIds[command.Row]));
+                    break;
+            }
         }
 
         private bool Overlaid => historyOpen || skipConfirmOpen;
@@ -276,6 +329,8 @@ namespace Game.Dialogue
             int count = view.SetLine(generation, visit, preparing ? speaker : rules.Speaker, rules.Text);
             characterProgress = 0;
             availability = null;
+            choiceRowAvailable.Clear(); // SetLine 已清掉界面上的选项行，这里同步清
+            choiceRowIds.Clear();
             ReleaseChoiceIcons();
             for (int slot = 0; slot < handles.Length; slot++)
             {
@@ -335,12 +390,18 @@ namespace Game.Dialogue
             if (!any) throw new InvalidOperationException("当前选择没有可用出口：" + rules.Current.Id);
             if (!changed) return;
             view.ClearChoices();
+            choiceRowAvailable.Clear();
+            choiceRowIds.Clear();
             for (int i = 0; i < choices.Length; i++)
             {
                 DialogueContent.Choice choice = choices[i];
                 bool shown = availability[i] || !choice.HideWhenUnavailable;
                 view.AddChoice(choice, availability[i], shown ? ResolveChoiceIcon(choice.IconKey) : null);
+                if (!shown) continue; // 与 View.AddChoice 的隐藏判定一致：隐藏的不占行号
+                choiceRowAvailable.Add(availability[i]);
+                choiceRowIds.Add(choice.Id);
             }
+            view.SelectChoice();
         }
 
         // 已加载返回图标；未请求过就发起异步加载并先返回 null（无图标显示，加载完回填），不阻塞选项出现。

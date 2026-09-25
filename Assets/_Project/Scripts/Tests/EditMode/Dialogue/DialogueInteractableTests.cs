@@ -1,5 +1,5 @@
 // 职责：钉住 DialogueInteractable 的范围判定（三维距离）、无对话树时的常驻台词轮换与可交互判定，
-//   以及交互焦点的「选最近可交互者」纯选择逻辑（DialogueInteractionFocus.SelectNearest）。
+//   以及交互焦点的「选最近可交互者」纯选择逻辑（DialogueInteractionFocus.SelectNearest）、交互提示 HUD 的拼字符串（键位回退「E」、「对话 · 名字」）。
 // 为什么新建：现有 Dialogue 测试各测一个类（Rules / Catalog / Policy / Service），都不涉及场景组件；
 //   按「一个被测类一个测试类」新建。
 using System.Collections.Generic;
@@ -118,6 +118,25 @@ namespace Game.Tests.EditMode.Dialogue
                 Object.DestroyImmediate(far);
                 Object.DestroyImmediate(near);
             }
+        }
+
+        [TestCase(null, "E")]
+        [TestCase("", "E")]
+        [TestCase("   ", "E")]
+        [TestCase("F", "F")]
+        [TestCase(" Q ", "Q")]
+        public void HudKeyText_FallsBackToE_WhenBindingDisplayEmpty(string display, string expected)
+        {
+            Assert.That(DialogueInteractHudView.FormatKeyText(display), Is.EqualTo(expected));
+        }
+
+        [TestCase("长老", "对话 · 长老")]
+        [TestCase(" 旅人 ", "对话 · 旅人")]
+        [TestCase("", "对话")]
+        [TestCase(null, "对话")]
+        public void HudLabel_ShowsNpcName_OrVerbOnly(string npcName, string expected)
+        {
+            Assert.That(DialogueInteractHudView.FormatLabel(npcName), Is.EqualTo(expected));
         }
 
         private static DialogueInteractable CreateBubbleNpc(GameObject go, Vector3 position, Transform rangeActor)

@@ -64,9 +64,14 @@ namespace Game.Dialogue
                     resolver.Resolve<DialogueSceneBinder>(),
                     resolver.Resolve<DialogueService>(),
                     resolver.Resolve<IUIService>(),
+                    resolver.Resolve<IHudVisibility>(),
                     resolver.Resolve<IInputService>(),
                     resolver.Resolve<ISubscriber<BootCompletedEvent>>(),
                     resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton).AsSelf();
+            // 对白键盘 / 手柄路径：每帧读 Dialogue 动作图，翻成与点击同一套处理（Dialogue 图由 DialogueService 开关）。
+            builder.RegisterEntryPoint(resolver => new DialogueKeyboardInput(
+                    resolver.Resolve<DialogueController>(),
+                    resolver.Resolve<IInputService>()), Lifetime.Singleton);
         }
 
         // 忘了拖配置时不让启动直接崩：记 Error 指明该拖哪个字段，再用代码建的默认值顶上（同 SampleInstaller）。

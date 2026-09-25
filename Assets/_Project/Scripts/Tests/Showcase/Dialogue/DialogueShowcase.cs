@@ -1,4 +1,4 @@
-// 职责：Dialogue 模块回放——范围焦点与右下角对话按钮、无对话树 NPC 的头顶台词气泡、交互拉起对白后的打字、三连点补全、倍速、自动推进、条件选项隐藏与图标、选择与跳过（含确认弹窗），
+// 职责：Dialogue 模块回放——范围焦点与底部交互提示、无对话树 NPC 的头顶台词气泡、交互拉起对白后的打字、三连点补全、倍速、自动推进、条件选项隐藏与图标、选择与跳过（含确认弹窗），
 //   以及对白期间世界时停、结束后恢复（PRD 验收 A4–A6）。
 using System;
 using System.Collections;
@@ -111,10 +111,12 @@ namespace Game.Tests.Showcase.Dialogue
             yield return Step("单点一下对白区：推进到下一句", () => RequireButton("TapArea").onClick.Invoke());
             yield return Check("推进到第二句 l2", () => CurrentIs("l2"), 2f);
 
-            string[] expectedSpeeds = { "x2", "x4", "x1" };
+            // 期望值与 DialogueView 同源拼：倍速文字 + 该动作第一条键盘绑定的键位提示（不写死键位）。
+            string speedHint = DialogueKeyboardInput.KeyboardHint(input.Actions.Dialogue.Speed);
+            float[] expectedSpeeds = { 2f, 4f, 1f };
             for (int i = 0; i < expectedSpeeds.Length; i++)
             {
-                string expected = expectedSpeeds[i];
+                string expected = DialogueView.WithHint(DialogueView.FormatSpeed(expectedSpeeds[i]), speedHint);
                 yield return Step($"倍速循环：第 {i + 1} 次点倍速按钮", () => RequireButton("SpeedButton").onClick.Invoke());
                 yield return Check($"倍速标签显示 {expected}", () => LabelText("SpeedLabel") == expected, 2f);
             }
@@ -242,13 +244,15 @@ namespace Game.Tests.Showcase.Dialogue
 
             var elder = FindRequired<DialogueInteractable>("Elder");
             DialogueInteractionFocus focus = ResolveService<DialogueInteractionFocus>();
-            yield return WaitUntil("右下角交互 HUD 已打开", () => ui != null && ui.Get<DialogueInteractHudView>() != null, 5f);
-            yield return Check("玩家在长者附近：焦点是长者，右下角「对话」按钮显示，长者头顶亮起「!」",
-                () => focus != null && focus.Current == elder && HudRootActive() && ChildActive(elder, "MarkerFocus")
+            yield return WaitUntil("交互提示 HUD 已打开", () => ui != null && ui.Get<DialogueInteractHudView>() != null, 5f);
+            yield return Check("玩家在长者附近：焦点是长者，底部「[E] 对话 · 老者」提示显示，长者头顶亮起「!」",
+                () => focus != null && focus.Current == elder && HudRootActive()
+                      && HudLabelText() == DialogueInteractHudView.FormatLabel(elder.DisplayName)
+                      && ChildActive(elder, "MarkerFocus")
                       && ChildActive(elder, "NameLabel"), 3f);
             yield return Snapshot("焦点·对话按钮");
 
-            yield return Step("点右下角「对话」按钮", () =>
+            yield return Step("点底部交互提示", () =>
             {
                 elder.OnCompleted -= RecordResult;
                 elder.OnCompleted += RecordResult;
@@ -341,6 +345,12 @@ namespace Game.Tests.Showcase.Dialogue
         }
 
         /// <summary>交互 HUD 上的整卡按钮；HUD 没开或找不到就抛异常，让 Step 记失败。</summary>
+        private string HudLabelText()
+        {
+            DialogueInteractHudView hud = ui == null ? null : ui.Get<DialogueInteractHudView>();
+            return hud == null ? string.Empty : hud.LabelText;
+        }
+
         private Button RequireHudButton()
         {
             DialogueInteractHudView hud = ui == null ? null : ui.Get<DialogueInteractHudView>();

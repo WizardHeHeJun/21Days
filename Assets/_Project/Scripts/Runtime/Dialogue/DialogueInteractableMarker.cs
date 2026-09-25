@@ -34,8 +34,10 @@ namespace Game.Dialogue
         {
             if (target == null) return;
             bool speechShowing = speechBubble != null && speechBubble.IsShowing;
-            bool focused = target.Focused && !speechShowing;
-            bool idle = !target.Focused && !speechShowing && target.CanInteract;
+            // 沉浸模式：标记与名字全隐藏。
+            bool hidden = target.HiddenByHud;
+            bool focused = target.Focused && !speechShowing && !hidden;
+            bool idle = !target.Focused && !speechShowing && !hidden && target.CanInteract;
             SetShown(bubbleFocused, focused);
             SetShown(bubbleIdle, idle);
             if (nameLabel != null && nameLabel.gameObject.activeSelf != focused) nameLabel.gameObject.SetActive(focused);

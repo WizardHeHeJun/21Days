@@ -20,6 +20,12 @@ namespace Game.Dialogue
     /// </summary>
     public sealed class DialogueService : IDisposable
     {
+        /// <summary>
+        /// 对白动作图的名字（GameInput 里的 Dialogue 图：推进 / 自动 / 倍速 / 跳过 / 历史 / 选项键）。
+        /// 常量放本模块而不放 Core 的 InputService：Core 不带玩法名词。启动时不启用，只在对白期间由本服务开关。
+        /// </summary>
+        public const string InputMap = "Dialogue";
+
         private const string TargetPrefix = "dialogue:";
 
         private readonly DialogueCatalog catalog;
@@ -95,7 +101,12 @@ namespace Game.Dialogue
                     // Actions 为 null（InputService 尚未初始化、或 EditMode 测试）时没有输入图可管，记录 / 禁用 / 恢复一并跳过。
                     bool hasInput = input.Actions != null; // lint-ok: 只判动作集是否已创建，不读设备输入、不影响回放
                     bool gameplayWasEnabled = hasInput && input.Actions.Gameplay.enabled; // lint-ok: 只读动作图启用状态用于收尾恢复，不读设备输入、不影响回放
-                    if (hasInput) input.DisableMap(InputService.GameplayMap);
+                    // 对白键位（推进 / 自动 / 倍速 / 跳过 / 历史 / 选项）只在对白期间有效：与关 Gameplay 同处打开，收尾对称关闭。
+                    if (hasInput)
+                    {
+                        input.DisableMap(InputService.GameplayMap);
+                        input.EnableMap(InputMap);
+                    }
                     try
                     {
                         OnStarted?.Invoke(new DialogueStartedEvent(dialogueId));
@@ -105,6 +116,8 @@ namespace Game.Dialogue
                     }
                     finally
                     {
+                        // 正常结束、取消、异常都走这里：先关对白图，再按进来前的状态恢复 Gameplay 图。
+                        if (hasInput) input.DisableMap(InputMap);
                         if (gameplayWasEnabled) input.EnableMap(InputService.GameplayMap);
                     }
                 }

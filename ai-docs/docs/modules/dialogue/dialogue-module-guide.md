@@ -16,8 +16,9 @@ maturity: stable
 **做**：按对话树编号拉起一段对白并跑完——查内容、暂停世界、关 Gameplay 输入图、打字机展示台词、
 左右两槽立绘、条件选项（右侧竖排胶囊 + 图标）、三连点补全 / 倍速 / 自动 / 跳过（先弹确认）、历史面板，
 结束时恢复现场、广播事件、返回出口。
-场景侧：范围交互焦点（离玩家最近的可交互 NPC，确认键或右下角「对话」HUD 触发）、NPC 头顶「…/!」标记与名字、
+场景侧：范围交互焦点（离玩家最近的可交互 NPC，交互键 E / F / 手柄 A 或底部居中交互提示「[E] 对话 · 名字」触发）、NPC 头顶「…/!」标记与名字、
 无对话树 NPC 的头顶常驻台词气泡（不暂停世界）。也可点击 NPC 或代码调用拉起。
+沉浸模式（Core `IHudVisibility` / `HudVisibilityChangedEvent`）：`DialogueSceneBinder` 订阅事件后对已登记物体调 `DialogueInteractable.SetHiddenByHud`，头顶标记、名字、台词气泡随之隐藏、点击 NPC 不响应；`DialogueInteractionFocus` 沉浸时不选焦点（`Current` 为 null，交互键 / HUD 点击无效），交互提示 HUD 由 UIService 一并隐藏。代码直接调 `Interact()` 不受影响。
 
 **不做**（都归 Narrative 或后续工作）：
 
@@ -49,9 +50,10 @@ maturity: stable
 | `IDialogueConditionSource` / `DefaultDialogueConditionSource` | 选项条件的事实快照来源；默认实现是占位 | 根作用域单例，Service 传给 Controller |
 | `DialogueInteractable` | 场景组件：对话树编号（`0` = 无树）+ 显示名 + 常驻台词 + 交互半径 + 点击入口；`Focused` 由焦点系统写 | 场景物体；`DialogueSceneBinder` 注入 Service 与场景 Actor |
 | `DialogueSceneBinder` | 入口点：启动时与每次 `sceneLoaded` 扫场景，有树的 `Bind`、全部登记进 `Bound`，找玩家标记 `Actor`；`sceneUnloaded` 清已销毁项 | 根作用域入口点（`AsSelf`，焦点系统注入它） |
+| `DialogueKeyboardInput` | `ITickable` 入口点：对白进行中每帧读 `Dialogue` 动作图 + `UI/Cancel`，经静态纯函数 `Map(key, state)` 翻成处理动作，交给 `DialogueController.HandleKey` 调与点击同一套处理函数；首次拿到动作集时把按钮键位提示交给 Controller | 根作用域入口点（`DialogueInstaller`） |
 | `DialogueInteractionActor` | 玩家根上的空标记：测距原点 | 场景玩家物体 |
-| `DialogueInteractionFocus` | `ITickable` 入口点：每帧在 `Bound` 里选最近且 `CanInteract` 的为焦点（`SelectNearest` 静态纯函数，无分配）；确认键 / HUD 点击 → `Current.Interact()`；驱动 HUD 显隐 | 根作用域入口点（`AsSelf`） |
-| `DialogueInteractHudView` | `UIView`（Hud 层）：右下角「对话」卡片，常驻打开，显隐只切 `root`；抛 `OnInteract` | 焦点系统在 `BootCompletedEvent` 后打开 |
+| `DialogueInteractionFocus` | `ITickable` 入口点：每帧在 `Bound` 里选最近且 `CanInteract` 的为焦点（`SelectNearest` 静态纯函数，无分配）；交互键（`Gameplay.Interact`）/ HUD 点击 → `Current.Interact()`；驱动 HUD 显隐，打开后给 HUD 赋一次键位显示串 | 根作用域入口点（`AsSelf`） |
+| `DialogueInteractHudView` | `UIView`（Hud 层）：底部居中 48 px 高胶囊「[键位] 对话 · NPC 名」，常驻打开，显隐只切 `root`；整条是按钮，抛 `OnInteract`；拼字符串是静态纯函数 `FormatKeyText` / `FormatLabel` | 焦点系统在 `BootCompletedEvent` 后打开 |
 | `DialogueInteractableMarker` | NPC 头顶三态标记：不可交互全隐 / 可交互灰「…」/ 焦点白「!」+ 名字；气泡显示中让位 | 场景 NPC（取代已删除的 `DialogueInteractableHint`） |
 | `DialogueSpeechBubble` | 世界空间气泡：订阅 `OnBubbleRequested`，逐字 → ▼ → 停留 `holdSeconds` → 淡出，全程 unscaled；高度随正文行数自适应 | 预制体 `Prefabs/World/DialogueSpeechBubble.prefab` 根上，实例挂 NPC 子物体 |
 | `DialogueInstaller` | `GameplayInstaller`：注册以上全部 | Boot 场景 `GameBootstrap` 物体 |
@@ -70,7 +72,7 @@ Core 侧配套：`Game.Core.Boot.FallbackCamera`（`Assets/_Project/Scripts/Core
 焦点：DialogueInteractionFocus.Tick（每帧）
         Actor 为空或 service.IsRunning → 无焦点；否则 SelectNearest(Actor, binder.Bound)
         焦点变化 → 旧.Focused=false / 新.Focused=true → HUD Show/Hide → 埋 focus_changed → OnFocusChanged
-        Gameplay.Confirm 按下 / HUD.OnInteract → Current.Interact()
+        Gameplay.Interact 按下（E / F / 手柄 A）/ HUD.OnInteract → Current.Interact()
 触发：DialogueInteractable.Interact() / OnPointerClick
         ├─ 无树（dialogueId==0）且有台词 → OnBubbleRequested(下一句，循环) → DialogueSpeechBubble.Show
         │     （不暂停世界、不切输入图、不开面板；到此为止）
@@ -81,16 +83,17 @@ DialogueService.PlayAsync
   ├─ DialogueCatalog.TryGet(id)          （首次访问：IConfigService.Tables → 翻译 → 缓存）
   ├─ DialogueRules.Start(content)        + policy.ResetForDialogue()
   ├─ IWorldPauseService.Acquire(this)    （timeScale=0 + 逻辑 tick 停）
-  ├─ IInputService.DisableMap(Gameplay)  （UI 图不动，EventSystem 靠它）
+  ├─ IInputService.DisableMap(Gameplay) + EnableMap(Dialogue)  （UI 图不动，EventSystem 靠它）
   ├─ OnStarted → DialogueController.PresentAsync(conditions, "dialogue:<id>", policy, ct)
   │       每帧：Skipping? → rules.Skip ； Visit 变 → PrepareAsync（SetLine + 立绘）→ rules.Ready
   │             Typing → rules.RevealTo(cps × unscaledΔ) ； policy.TickAuto → Submit(Advance)
   │       View.OnTap → policy.RegisterTap → Submit(Advance) ； View.OnIntent → Submit(Choose)
+  │       DialogueKeyboardInput.Tick → HandleKey → Map → 同一套处理函数（Tap / 按钮 / Submit(Choose)）
   │       View.OnSkip → 开 DialogueSkipConfirmView（覆盖中）→ 确认 policy.BeginSkip / 取消 关闭恢复
   │       选项行：RefreshChoices → ResolveChoiceIcon(IconKey) 异步加载 → View.SetChoiceIcon 回填
   │       Submit → rules.Apply(intent, conditions.Snapshot(target))
   │       收尾（finally）：先退订全部面板事件，只关真正打开过的面板（跳过确认 / 历史 / 主面板），再释放立绘与图标句柄
-  └─ finally：恢复 Gameplay 图（仅当进来前是开的）→ 释放暂停 → 非正常结束则 rules.Cancel → OnEnded
+  └─ finally：关 Dialogue 图、恢复 Gameplay 图（仅当进来前是开的）→ 释放暂停 → 非正常结束则 rules.Cancel → OnEnded
 返回 DialogueResult(id, outcome, skipped)
 
 内容：Tables/Data/dialogue/*.json ─Luban→ cfg.dialogue.* + dialogue_tbdialogue*.bytes
@@ -108,7 +111,7 @@ DialogueService.PlayAsync
 | --- | --- |
 | `Game.Core.UI`（`IUIService` / `UIView`） | 开关 `DialogueView` / `DialogueHistoryView` / `DialogueSkipConfirmView` / `DialogueInteractHudView` |
 | `Game.Core.Assets`（`IAssetService` / `AssetHandle<Sprite>`） | 立绘与选项图标加载与释放 |
-| `Game.Core.Input`（`IInputService`） | 关 / 恢复 Gameplay 动作图；焦点系统读 `Gameplay.Confirm` |
+| `Game.Core.Input`（`IInputService`） | 关 / 恢复 Gameplay 动作图；焦点系统读 `Gameplay.Interact`（按下 + 第一条键盘绑定的显示串） |
 | `Game.Core.Events`（`BootCompletedEvent`，经 MessagePipe `ISubscriber`） | 焦点系统等启动完成再开 HUD |
 | LitMotion | 气泡淡出（`UpdateIgnoreTimeScale`） |
 | `Game.Core.Timing`（`IWorldPauseService` / `IClock`） | 世界暂停；unscaled 时间驱动打字与自动 |
@@ -125,13 +128,37 @@ Core 不认识本模块；`IWorldPauseService` 里没有对话名词。Narrative
 | 资源 | 谁持有 | 位置 | 为什么 |
 | --- | --- | --- | --- |
 | 世界暂停令牌 | `DialogueService` | `DialogueService.cs:92` | 会话级资源；放 Controller 会让表现层依赖暂停服务 |
-| Gameplay 动作图 | `DialogueService` | `DialogueService.cs:95`–`108` | 只恢复进来前的状态：调用方本来关着（如过场）就不擅自打开；`input.Actions == null`（输入服务未初始化 / EditMode）时记录、禁用、恢复一并跳过 |
+| Dialogue 动作图 | `DialogueService` | 与关 Gameplay 同处 `EnableMap(DialogueService.InputMap)`（常量在本模块，Core 不带玩法名词），内层 `finally` 先 `DisableMap(InputMap)` 再恢复 Gameplay | 对白键位只在对白期间有效；启动时不启用（`InputService.InitializeAsync` 只开 Gameplay）；`Actions == null` 时同样跳过 |
+| Gameplay 动作图 | `DialogueService` | `DialogueService.cs:102`–`121` | 只恢复进来前的状态：调用方本来关着（如过场）就不擅自打开；`input.Actions == null`（输入服务未初始化 / EditMode）时记录、禁用、恢复一并跳过 |
 | 重入保护 | `DialogueService` | `DialogueService.cs:70`–`74` | 同一时刻只允许一段对白 |
 | 历史面板开关、`Suspended` | `DialogueController` | `DialogueController.cs:79` | 纯表现；挂起期间不推进不收输入（留给存档等外部挂起） |
 | 跳过确认弹窗、「覆盖中」 | `DialogueController` | `DialogueController.cs:148`–`171`、`248` | `Overlaid = historyOpen \|\| skipConfirmOpen`：覆盖中不打字、不自动、不跳过，主面板输入关 |
-| 交互焦点、确认键 | `DialogueInteractionFocus` | `DialogueInteractionFocus.cs:60`–`74` | 对白进行中焦点清空；Gameplay 图此时已关，不会重入 |
+| 交互焦点、交互键 | `DialogueInteractionFocus` | `DialogueInteractionFocus.cs:68`–`82` | 对白进行中焦点清空；Gameplay 图此时已关，不会重入 |
 
-Controller、View、Rules、Focus、气泡一律不碰 `Time.timeScale` / 输入图（Focus 只读动作，不开关图）。
+Controller、View、Rules、Focus、键位入口、气泡一律不碰 `Time.timeScale` / 输入图（Focus 与 `DialogueKeyboardInput` 只读动作，不开关图）。
+
+## 键盘 / 手柄操作
+
+对白期间 `DialogueService` 开 `Dialogue` 动作图（`GameInput.inputactions`），`DialogueKeyboardInput.Tick` 读动作 →
+`DialogueController.HandleKey` → 静态 `DialogueKeyboardInput.Map(key, KeyState)` → 调**与点击同一个**处理函数（`Tap` / `ToggleAuto` / `CycleSpeed` / `RequestSkip` / `RequestHistory` / `DismissHistory` / `CancelSkip` / `Submit(Choose)`）。
+
+| 动作 | 键盘 | 手柄 | 等价于 | 何时有效 |
+| --- | --- | --- | --- | --- |
+| `Advance` | 空格 / 回车 / 小键盘回车 | A（South） | 点对话框 `tapArea`（三连点补全同样计数） | 主面板、已就绪、**非选项期** |
+| `Auto` | A | Y（North） | 点「自动」 | 主面板 |
+| `Speed` | S | X（West） | 点倍速 | 主面板 |
+| `Skip` | 左 / 右 Ctrl | RB | 点「跳过」（先弹确认） | 主面板 |
+| `History` | H | LB | 点「LOG」；历史开着时再按 = 关闭 | 主面板 / 历史面板 |
+| `Choice1`–`Choice4` | 数字 1–4 / 小键盘 1–4 | — | 点显示中的第 N 行选项 | 选项期；越界或该行不可用（置灰）忽略；隐藏的不可用选项不占行号 |
+| `UI/Cancel` | Esc | B（UI 图默认） | 历史开着 = 关闭；跳过确认开着 = 点取消 | 只在这两个弹窗；**主面板上什么都不做（Esc 不关对白）** |
+
+- 弹窗优先：跳过确认开着只认 `Cancel`；历史开着只认 `History` / `Cancel`；其余键全部忽略（`DialogueKeyboardInput.Map`）。
+- 选项期 `Advance` 不推进：回车同时是 UI `Submit`，选项出现后 `DialogueView.SelectChoice` 在**下一帧**把 EventSystem 选中设到第一个可用项（资格刷新重建行时按选项 id 保留原选中），回车 / 手柄 A 由 UI Submit 点中选中项、方向键导航。延后一帧是为了让「补全出选项的那次回车」不被 UI Submit 当成立刻选第一项。
+- 跳过确认弹窗打开即选中「取消」（预制体 `defaultSelected` = `CancelButton`，由 UIService 打开后设选中），误按回车不会跳过。历史 / 跳过弹窗关闭后（UIService 把选中清空之后）`SelectChoice` 下一帧把选中还给选项。
+- 三个对白面板都重写 `CloseOnCancel => false`：通用 `UICancelRouter` 不能越过 Controller 直接关它们（主面板关了流程卡死；弹窗被直接关会让 Controller 的覆盖中标记与事件退订对不上）。Esc 统一走 `DialogueKeyboardInput` → Controller 的正常收尾。
+- 鼠标点过的控件按钮（含 `tapArea`）点完即取消 EventSystem 选中，否则之后按回车会被 UI Submit 再点一次；`tapArea` 的导航设为 None，方向键不会落到透明点击区上。
+- 按钮文字 = 固定文案 + 空格 + 键位（「自动 A」「x1 S」「跳过 Ctrl」「LOG H」），键位取该动作**第一条键盘绑定**的 `GetBindingDisplayString`（`DialogueKeyboardInput.KeyboardHint`；绑定没分控制方案组，按路径前缀 `<Keyboard>` 筛），跟随系统键盘布局；只在首次拿到动作集时取一次。选项文字前缀「1.」「2.」在建行时拼一次。
+- 读动作的行带 `// lint-ok`：对白表现层不进确定性模拟、不影响回放（同焦点系统读 `Gameplay.Confirm` 的例外）。
 
 ## 表现语义
 
@@ -175,11 +202,11 @@ Controller、View、Rules、Focus、气泡一律不碰 `Time.timeScale` / 输入
   不让启动崩（`DialogueService.cs:137`）。
 - **`Generation` / `Visit` 身份**：每次 `Start / Restore / Cancel` 递增 Generation、每进一个节点递增 Visit；
   意图与异步立绘加载完成后都要比对，防止上一句 / 上一段的迟到回调改到当前状态。选项图标另用 `choiceIconEpoch`，同理。
-- **焦点系统直接读 `Actions.Gameplay.Confirm`**（`DialogueInteractionFocus.cs:70`）：项目约定玩法不直接读输入、走确定性模拟，
+- **焦点系统直接读 `Actions.Gameplay.Interact`**（`DialogueInteractionFocus.cs:79`）：交互用独立动作（E / F / 手柄 A），不再复用 Confirm（回车 / 空格）——Confirm 是 `LiveInputSource` 采样的确定性输入位，两者分开后按回车不会误拉起对话。项目约定玩法不直接读输入、走确定性模拟，
   但「触发一段对话」不进逻辑帧、不影响回放，属于允许的例外（行尾 `lint-ok` 注释说明）。别把它当先例用在模拟逻辑里。
-- **HUD 等 `BootCompletedEvent` 再开**（`DialogueInteractionFocus.cs:56`）：入口点 `Start` 在容器构建完就跑，早于 `UIService` 初始化，
-  那时 `OpenAsync` 必失败。HUD 开不出来只记 Error，确认键与点击 NPC 照常可用。
-- **HUD 打开与 `Dispose` 竞态**（`DialogueInteractionFocus.cs:143`）：`OpenHudAsync` await 期间作用域可能已 `Dispose`，
+- **HUD 等 `BootCompletedEvent` 再开**（`DialogueInteractionFocus.cs:60`）：入口点 `Start` 在容器构建完就跑，早于 `UIService` 初始化，
+  那时 `OpenAsync` 必失败。HUD 开不出来只记 Error，交互键与点击 NPC 照常可用。
+- **HUD 打开与 `Dispose` 竞态**（`DialogueInteractionFocus.cs:152`）：`OpenHudAsync` await 期间作用域可能已 `Dispose`，
   那时 `hud` 字段还没赋值、`Dispose` 关不到它；所以 await 回来先看 `disposed`，是就立刻关掉刚开的面板，避免孤儿 HUD。
 - **面板收尾对称退订、只关打开过的**（`DialogueController.cs:143`、`207`–`217`）：历史面板关闭前先退订 `OnDismiss`（与跳过确认弹窗对称）；
   `finally` 里对 `null`（从未打开或已关）的面板不调 `CloseAsync`，中途取消时不会对未打开的面板报错。
@@ -203,12 +230,12 @@ Controller、View、Rules、Focus、气泡一律不碰 `Time.timeScale` / 输入
 | Installer | `Assets/_Project/Scenes/Boot.unity` 的 `GameBootstrap` 物体挂 `DialogueInstaller`，**Config** 字段拖 `Assets/_Project/Data/Dialogue/DialogueConfig.asset` | 没挂：解析不到 `DialogueService`；没拖：记 Error 并用默认值顶上（`DialogueInstaller.cs:72`） |
 | 面板地址 | Addressables（UI 组）`DialogueView` → `Prefabs/UI/DialogueView.prefab`；`DialogueHistoryView` → `Prefabs/UI/DialogueHistoryView.prefab`。**地址等于类名** | `ui.OpenAsync<T>()` 找不到预制体 |
 | 立绘地址 | 角色表里每个 `sprite` 在 Addressables 有同名地址（现为 `Dialogue/Portrait_<角色>_<表情>`，UI 组） | 回退默认表情；默认也缺则隐藏该槽 |
-| 交互 HUD / 跳过确认地址 | `DialogueInteractHudView` → `Prefabs/UI/DialogueInteractHudView.prefab`；`DialogueSkipConfirmView` → `Prefabs/UI/DialogueSkipConfirmView.prefab`（UI 组，地址等于类名） | HUD：记 Error，无右下角按钮；弹窗：点跳过时对白抛异常收尾 |
+| 交互 HUD / 跳过确认地址 | `DialogueInteractHudView` → `Prefabs/UI/DialogueInteractHudView.prefab`；`DialogueSkipConfirmView` → `Prefabs/UI/DialogueSkipConfirmView.prefab`（UI 组，地址等于类名） | HUD：记 Error，无底部交互提示；弹窗：点跳过时对白抛异常收尾 |
 | 选项图标地址 | 表里 `icon` 非空时 Addressables 有同名地址（现为 `Dialogue/ChoiceIcon_Go` / `_Leave`，UI 组） | 埋 `choice_icon_failed`，该选项无图标 |
-| 玩家标记 | 玩家根挂 `DialogueInteractionActor`（场景里一个） | 没有焦点、没有 HUD、确认键无效；NPC 未配 `actor` 时不限距离 |
+| 玩家标记 | 玩家根挂 `DialogueInteractionActor`（场景里一个） | 没有焦点、没有 HUD、交互键无效；NPC 未配 `actor` 时不限距离 |
 | NPC | 根上 `BoxCollider`（3D）或 `Collider2D`（2D）+ `DialogueInteractable` + `DialogueInteractableMarker`；子物体 `MarkerIdle` / `MarkerFocus`（SpriteRenderer）/ `NameLabel`（TMP 3D），3D 场景子物体再挂 `CameraBillboard` | 缺碰撞体：点不中；缺标记：无头顶提示（交互照常） |
 | 无树 NPC | `dialogueId = 0`、`bubbleLines` 非空，再放一个 `DialogueSpeechBubble.prefab` 实例作子物体，并拖进标记的 `speechBubble` | 缺气泡实例：交互只抛事件没人显示；没拖进标记：「!」与气泡重叠 |
-| 点击拉起 | 场景相机挂 `PhysicsRaycaster`（3D 碰撞体）或 `Physics2DRaycaster`（`Collider2D`）；EventSystem 由 `UIService` 创建 | `OnPointerClick` 静默不触发（仍可确认键 / HUD / 代码调 `Interact()`） |
+| 点击拉起 | 场景相机挂 `PhysicsRaycaster`（3D 碰撞体）或 `Physics2DRaycaster`（`Collider2D`）；EventSystem 由 `UIService` 创建 | `OnPointerClick` 静默不触发（仍可交互键 / HUD / 代码调 `Interact()`） |
 | Boot 相机 | Boot 的 `Main Camera` 挂 `FallbackCamera`；玩法场景自带启用的相机 | Boot 相机在玩法相机之上重画，灰底 |
 | 绑定 | `DialogueSceneBinder` 只在启动与 `sceneLoaded` 时扫描（含未激活物体，不含 DontDestroyOnLoad） | **运行时 `Instantiate` 的 `DialogueInteractable` 要手动 `Bind(service)`**，否则交互只记 Warn；且**不进 `Bound`、不参与焦点** |
 | 入口 | 从 Boot → 标题「开始」进入玩法场景才有对白服务、焦点系统与 EventSystem | 直接 Play 玩法场景：有树 NPC `Start` 记 Warn，焦点 / HUD / 点击都不生效；只剩无树气泡链路本身可用（代码调 `Interact()`） |
@@ -227,8 +254,9 @@ Controller、View、Rules、Focus、气泡一律不碰 `Time.timeScale` / 输入
 | `history` | `HistoryButton`（LOG） | |
 | `auto` / `autoLabel` | `AutoButton`、`AutoLabel` | 标签「自动」/「自动中」 |
 | `speed` / `speedLabel` | `SpeedButton`、`SpeedLabel` | 标签 `x1` / `x2` / `x4` |
-| `skip` | `SkipButton` | 跳过中置灰 |
-| `choiceRoot` / `choiceTemplate` | `ChoiceRoot`（VerticalLayoutGroup，右侧竖排：anchor / pivot (1, 0.5)、右边距 40、宽 720）/ `ChoiceTemplate`（深色胶囊） | 模板下须有子物体 `Icon`（Image，名字写死）与 `Label`（TMP）；运行时隐藏 |
+| `skip` / `skipLabel` | `SkipButton`、`SkipButton/Label` | 跳过中置灰；标签运行时写「跳过 + 键位」 |
+| `history` / `historyLabel` 的标签 | `HistoryButton/Label` | 运行时写「LOG + 键位」 |
+| `choiceRoot` / `choiceTemplate` | `ChoiceRoot`（VerticalLayoutGroup，右侧竖排：anchor / pivot (1, 0.5)、右边距 40、宽 560）/ `ChoiceTemplate`（深色胶囊，560×44，文字字号 22 自适应到 16；悬停淡金 + `UIButtonFeedback`） | 模板下须有子物体 `Icon`（Image，名字写死）与 `Label`（TMP）；运行时隐藏 |
 
 漏接任一字段（含模板缺 `Icon`），`OnOpenAsync` 的 `Validate()` 会逐个点名抛出（`DialogueView.cs:171`）。
 
@@ -236,8 +264,8 @@ Controller、View、Rules、Focus、气泡一律不碰 `Time.timeScale` / 输入
 
 | 预制体 | 字段 → 物体 |
 | --- | --- |
-| `Prefabs/UI/DialogueInteractHudView.prefab` | `root` / `button` → `Root`（整卡按钮）；`label` → `Label`；`icon` → `Icon`（可空） |
-| `Prefabs/UI/DialogueSkipConfirmView.prefab` | `message` → `Message`；`confirm` → `ConfirmButton`；`cancel` → `CancelButton` |
+| `Prefabs/UI/DialogueInteractHudView.prefab` | `root` / `button` → `Root`（整条胶囊按钮：锚点底部居中、`anchoredPosition (0, 72)`、`sizeDelta (320, 48)`，`HorizontalLayoutGroup`）；`keyLabel` → `KeyBadge/KeyText`（徽章 48×40）；`label` → `Label`（弹性宽度、单行省略号）；`icon` → `Icon`（可空，默认隐藏、不参与布局）。放底部居中而非右下角：右下角已被探索 HUD 的攻击 / 潜行 / 跑步按钮占住，PC 游戏交互提示也惯例在屏幕下方中央；与探索 HUD 的 `InteractPrompt`（y 160）不重叠 |
+| `Prefabs/UI/DialogueSkipConfirmView.prefab` | `message` → `Message`；`confirm` → `ConfirmButton`；`cancel` → `CancelButton`；`defaultSelected`（UIView 通用字段）→ `CancelButton`（打开即选中取消） |
 | `Prefabs/World/DialogueSpeechBubble.prefab`（世界空间 Canvas） | `root` → `Content`；`nameLabel` → `Name`；`body` → `Body`；`arrow` → `Arrow`；`group` → 根 `CanvasGroup`；`target` 留空（向父级找）。布局：根 `VerticalLayoutGroup` + `ContentSizeFitter`（纵向 Preferred）、`Content` 再一层 `VerticalLayoutGroup`，别给它们写死高度 |
 
 ## 内容表（Luban）
@@ -275,8 +303,9 @@ Controller、View、Rules、Focus、气泡一律不碰 `Time.timeScale` / 输入
 | EditMode | `Assets/_Project/Scripts/Tests/EditMode/Dialogue/DialogueRulesTests.cs`（8 条） | 补全 / 恢复不重记历史、选项复验、Skip 停在选项 / 写已读 / 环路抛错 / Generation 不符 |
 | EditMode | `.../DialoguePlaybackPolicyTests.cs`（9 条） | 三连点窗口、倍速循环、自动计时、重置、非法参数 |
 | EditMode | `.../DialogueCatalogTests.cs`（8 条） | 读真实 `.bytes`：1001 / 1002 结构、立绘指令、每个表情有地址、条件选项、选项图标键 |
-| EditMode | `.../DialogueInteractableTests.cs`（5 条） | 三维距离判范围、无树台词按序循环、有树未绑定 / 无树无台词不可交互、`SelectNearest` 跳过超范围 |
-| EditMode | `Assets/_Project/Scripts/Tests/EditMode/Dialogue/DialogueServiceTests.cs`（3 条） | 进行中重入抛 `InvalidOperationException`；未知 id 抛 `ArgumentException` 且不碰暂停 / 输入；Present 异常时清理并发 `OnEnded` |
+| EditMode | `.../DialogueInteractableTests.cs`（14 条，含参数化） | 三维距离判范围、无树台词按序循环、有树未绑定 / 无树无台词不可交互、`SelectNearest` 跳过超范围；交互提示键位显示串为空回退「E」、「对话 · 名字」拼接 |
+| EditMode | `Assets/_Project/Scripts/Tests/EditMode/Dialogue/DialogueServiceTests.cs`（6 条） | 进行中重入抛 `InvalidOperationException`；未知 id 抛 `ArgumentException` 且不碰暂停 / 输入；Present 异常时清理并发 `OnEnded`；对白期间 Dialogue 图开、Gameplay 图关，取消 / 异常后对称恢复，进来前关着的 Gameplay 不被打开 |
+| EditMode | `.../DialogueKeyboardInputTests.cs`（9 个方法 / 30 例） | 键位映射：主面板各键、未激活 / 未就绪忽略、选项期 Advance 忽略、Choice N 越界 / 不可用 / 空行忽略、历史与跳过确认期只放行弹窗键 |
 | EditMode | `Assets/_Project/Scripts/Tests/EditMode/Core/WorldPauseServiceTests.cs` | 暂停引用计数与 timeScale 恢复（Core 侧） |
 | Showcase | `Assets/_Project/Scripts/Tests/Showcase/Dialogue/DialogueShowcase.cs`（6 条） | 交互 → 打字 → 选项 → 结束且全程时停；跳过（经确认）停在选项；点击旅人拉起 1002；`SkipCancelled_DialogueContinues`；`Focus_ShowsHudButton_AndHudClickStartsDialogue`；`Bubble_ShowsAboveHead_WithoutPausing` |
 | 验证场景 | `Assets/_Project/Scenes/Verify/Dialogue.unity`（2D） | `Main Camera`（`Physics2DRaycaster`）、`Player`（Actor）、`Elder`（1001）、`Traveler`（1002）、`Villager`（无树 + 气泡） |
@@ -288,7 +317,7 @@ Controller、View、Rules、Focus、气泡一律不碰 `Time.timeScale` / 输入
 - **非阻塞旁白未实现**：节点 `blocking` 字段与 `DialogueRules.Blocking`（`DialogueRules.cs:39`）保留，但
   Service 对整段对白一律暂停世界、一律等点击推进。
 - **跳过确认后不可撤销**：确认后本段内一直跳过。
-- **HUD 不显示 NPC 名字**：`DialogueInteractHudView.Show(name)` 目前忽略参数，卡片只写「对话」。
+- **交互提示只显示键盘键位**：徽章文字取 `Interact` 第一条键盘绑定的 `GetBindingDisplayString()`（`DialogueInteractionFocus.cs:199`），打开时赋一次；取不到回退「E」（`DialogueInteractHudView.cs:90`）。手柄为主输入时不切换成手柄键位（要跟踪最近输入设备，暂不做）；运行中改键也不会刷新（尚无改键 UI）。
 - **常驻台词未进表**：`bubbleLines` 在 Inspector 配，不走 Luban、未本地化。
 - **`FallbackCamera` 只在场景加载 / 卸载时判断**：玩法场景加载后才启用的相机不会让它让位。
 - 对白与美术装饰（手绘边框、贴纸、背景模糊）仍是占位（PRP 8.4）。

@@ -23,7 +23,8 @@ namespace Game.Tests.EditMode.Dialogue
     /// <para>
     /// 所有假服务都同步完成（或同步取消 / 抛出），整条 <c>PlayAsync</c> 链路不需要等帧；
     /// 每条用例都把自己产生的 UniTask 异常用 <see cref="Capture"/> 观察掉，不留未观察异常砸别的用例（见 pitfalls）。
-    /// 输入服务的 <c>Actions</c> 为 null，同时覆盖「InputService 未初始化时不抛 NRE」的守卫。
+    /// 默认输入服务的 <c>Actions</c> 为 null，同时覆盖「InputService 未初始化时不抛 NRE」的守卫；
+    /// 动作图开关的用例经 <c>UseRealInput</c> 换成真实 <see cref="InputService"/>（外包一层记录调用顺序）。
     /// </para>
     /// </summary>
     public sealed class DialogueServiceTests
@@ -38,6 +39,9 @@ namespace Game.Tests.EditMode.Dialogue
         private DialogueRules rules;
         private DialogueConfig config;
         private DialogueService service;
+        private DialogueCatalog catalog;
+        private DialogueController controller;
+        private InputService realInput;
 
         [SetUp]
         public void SetUp()
@@ -47,8 +51,8 @@ namespace Game.Tests.EditMode.Dialogue
             ui = new FakeUIService();
             rules = new DialogueRules(new DialogueReadData(), 500, null);
             config = ScriptableObject.CreateInstance<DialogueConfig>();
-            var catalog = new DialogueCatalog(new FakeConfigService(ConfigService.BuildTables(ConfigServiceTests.ReadAllTableBytes())));
-            var controller = new DialogueController(rules, catalog, ui, new FakeAssetService(), new FakeClock(), null);
+            catalog = new DialogueCatalog(new FakeConfigService(ConfigService.BuildTables(ConfigServiceTests.ReadAllTableBytes())));
+            controller = new DialogueController(rules, catalog, ui, new FakeAssetService(), new FakeClock(), null);
             service = new DialogueService(catalog, rules, controller, config, new DefaultDialogueConditionSource(),
                 pause, input, null);
         }
@@ -57,7 +61,74 @@ namespace Game.Tests.EditMode.Dialogue
         public void TearDown()
         {
             service.Dispose();
+            realInput?.Dispose();
+            realInput = null;
             UnityEngine.Object.DestroyImmediate(config);
+        }
+
+        [Test]
+        public void PlayAsync_WhileRunning_SwapsGameplayMapForDialogueMap()
+        {
+            RecordingInput recording = UseRealInput();
+            Assert.That(realInput.Actions.Dialogue.enabled, Is.False, "启动时 Dialogue 图不应启用");
+            Assert.That(realInput.Actions.Gameplay.enabled, Is.True);
+            ui.Mode = FakeUIService.OpenMode.Pending;
+            using var cts = new CancellationTokenSource();
+
+            UniTask<DialogueResult> play = service.PlayAsync(KnownId, cts.Token);
+
+            Assert.That(realInput.Actions.Dialogue.enabled, Is.True, "对白期间 Dialogue 图应启用");
+            Assert.That(realInput.Actions.Gameplay.enabled, Is.False, "对白期间 Gameplay 图应关闭");
+
+            cts.Cancel();
+            Assert.That(Capture(play), Is.InstanceOf<OperationCanceledException>());
+            Assert.That(realInput.Actions.Dialogue.enabled, Is.False, "取消后 Dialogue 图应关闭");
+            Assert.That(realInput.Actions.Gameplay.enabled, Is.True, "取消后 Gameplay 图应恢复");
+            Assert.That(recording.Calls, Is.EqualTo(new[]
+            {
+                "Disable:" + InputService.GameplayMap, "Enable:" + DialogueService.InputMap,
+                "Disable:" + DialogueService.InputMap, "Enable:" + InputService.GameplayMap,
+            }));
+        }
+
+        [Test]
+        public void PlayAsync_WhenPresentThrows_ClosesDialogueMap()
+        {
+            RecordingInput recording = UseRealInput();
+            ui.Mode = FakeUIService.OpenMode.Throw;
+
+            Exception error = Capture(service.PlayAsync(KnownId));
+
+            Assert.That(error, Is.TypeOf<InvalidOperationException>());
+            Assert.That(realInput.Actions.Dialogue.enabled, Is.False, "异常收尾后 Dialogue 图应关闭");
+            Assert.That(realInput.Actions.Gameplay.enabled, Is.True, "异常收尾后 Gameplay 图应恢复");
+            Assert.That(recording.Calls, Has.Member("Disable:" + DialogueService.InputMap));
+        }
+
+        [Test]
+        public void PlayAsync_WhenGameplayWasDisabled_ClosesDialogueMapWithoutReopeningGameplay()
+        {
+            RecordingInput recording = UseRealInput();
+            realInput.DisableMap(InputService.GameplayMap); // 调用方本来关着 Gameplay（如过场中）
+            ui.Mode = FakeUIService.OpenMode.Throw;
+
+            Capture(service.PlayAsync(KnownId));
+
+            Assert.That(realInput.Actions.Dialogue.enabled, Is.False);
+            Assert.That(realInput.Actions.Gameplay.enabled, Is.False, "进来前关着的 Gameplay 图不应被打开");
+            Assert.That(recording.Calls, Has.No.Member("Enable:" + InputService.GameplayMap));
+        }
+
+        // 换成带真实动作集的输入服务（InputService 同步初始化、启用 Gameplay 图），并重建 Service 使用它。
+        private RecordingInput UseRealInput()
+        {
+            realInput = new InputService();
+            realInput.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+            var recording = new RecordingInput(realInput);
+            service.Dispose();
+            service = new DialogueService(catalog, rules, controller, config, new DefaultDialogueConditionSource(),
+                pause, recording, null);
+            return recording;
         }
 
         [Test]
@@ -168,6 +239,32 @@ namespace Game.Tests.EditMode.Dialogue
             public void DisableMap(string map) => MapCalls++;
         }
 
+        /// <summary>包一层真实 InputService：照常开关动作图，并按顺序记录「Enable:图名 / Disable:图名」。</summary>
+        private sealed class RecordingInput : IInputService
+        {
+            private readonly InputService inner;
+
+            public RecordingInput(InputService inner)
+            {
+                this.inner = inner;
+            }
+
+            public List<string> Calls { get; } = new List<string>();
+            public GameInput Actions => inner.Actions;
+
+            public void EnableMap(string map)
+            {
+                Calls.Add("Enable:" + map);
+                inner.EnableMap(map);
+            }
+
+            public void DisableMap(string map)
+            {
+                Calls.Add("Disable:" + map);
+                inner.DisableMap(map);
+            }
+        }
+
         /// <summary>打开面板要么挂起直到取消，要么直接抛；关闭一律空操作。</summary>
         private sealed class FakeUIService : IUIService
         {
@@ -190,6 +287,7 @@ namespace Game.Tests.EditMode.Dialogue
             public UniTask CloseAsync(UIView view, CancellationToken ct = default) => UniTask.CompletedTask;
             public UniTask CloseTopAsync(CancellationToken ct = default) => UniTask.CompletedTask;
             public T Get<T>() where T : UIView => null;
+            public void SetLayerVisible(UILayer layer, bool visible) { }
         }
 
         /// <summary>本文件的用例走不到立绘加载；被调到就说明流程不对。</summary>
