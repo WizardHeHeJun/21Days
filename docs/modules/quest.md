@@ -84,7 +84,7 @@
 | 接取通知文字 | 同上 | Activated Notification Format | 当前「接取任务：{0}」，`{0}` 换成任务标题 | 留空只显示标题 |
 | 完成通知文字 | 同上 | Completed Notification Format | 当前「任务完成：{0}」 | 同上 |
 
-Marker Lift 以下三项和两条通知格式在资产文件里还没写入，当前按上面列的默认值生效；在 Inspector 里改一次并保存就会写进资产。通知停留时长由通用界面配置 `Assets/_Project/Data/UI/UIConfig.asset` 的 Notification Seconds 决定（默认 2.5 秒），影响所有通知。
+两条通知格式在资产文件里还没写入，当前按上面列的默认值生效；在 Inspector 里改一次并保存就会写进资产。通知停留时长由通用界面配置 `Assets/_Project/Data/UI/UIConfig.asset` 的 Notification Seconds 决定（默认 2.5 秒），影响所有通知。
 
 ## 5. 现在有的内容
 
@@ -108,7 +108,6 @@ Marker Lift 以下三项和两条通知格式在资产文件里还没写入，�
 - 指引只在当前场景内有效，只有一张可玩场景，跨场景任务点要等多场景流转（roadmap A4）。
 - 任务面板只能点任务栏打开，没有键盘 / 手柄快捷键。
 - 任务面板底板在实机偶尔透底，原因未定位（roadmap 2.5 第 7 条）。
-- 对话 1002 的说话人是老者而非旅人，与任务「与旅人叙旧」的意图对不上，属于占位内容（见 [对话](dialogue.md) 第 5 节）。
 
 ## 7. 和其他模块的关系
 

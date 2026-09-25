@@ -33,7 +33,7 @@ ChibiPuppet（预制体根；ChibiPuppet + ChibiPuppetMotion + Animator）
 
 ## 3. 占位美术（`Art/Sprites/Characters/Puppet/`，PPU 100，整体高 1.6 世界单位）
 
-7 张 PNG，白底可染色 + 深色描边与五官：`Puppet_Head.png`（56×48，pivot 底中）、`Puppet_Hair.png`（60×34，pivot 底中）、`Puppet_Torso.png`（34×40，pivot 底中）、`Puppet_Arm.png`（12×34，pivot 顶中；左右共用，右臂 x 镜像）、`Puppet_Leg.png`（14×34，pivot 顶中，共用）。玩家变体染色：发 (0.45,0.28,0.16)、肤 (1,0.87,0.77)、衣 (0.2,0.55,1)、裤 (0.2,0.22,0.35)；巡逻者变体：衣 (0.55,0.55,0.55)、发 (0.25,0.25,0.25)。
+5 张分件图（头、发、躯干、臂、腿）拼成 7 个分件（臂、腿左右各共用一张），白底可染色 + 深色描边与五官：`Puppet_Head.png`（56×48，pivot 底中）、`Puppet_Hair.png`（60×34，pivot 底中）、`Puppet_Torso.png`（34×40，pivot 底中）、`Puppet_Arm.png`（12×34，pivot 顶中；左右共用，右臂 x 镜像）、`Puppet_Leg.png`（14×34，pivot 顶中，共用）。玩家变体染色：发 (0.45,0.28,0.16)、肤 (1,0.87,0.77)、衣 (0.2,0.55,1)、裤 (0.2,0.22,0.35)；巡逻者变体：衣 (0.55,0.55,0.55)、发 (0.25,0.25,0.25)。
 
 ## 4. 动画（`Art/Animations/`，命名按目录 README）
 
