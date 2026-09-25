@@ -19,7 +19,7 @@
 | Sample | 端到端跑通框架每一层的样板模块，给程序照抄用 | 样板 | 未挂 | 无（策划不用管） | [sample-module-guide.md](../../ai-docs/docs/modules/sample/sample-module-guide.md) | SO `Data/Sample/SampleConfig.asset` |
 
 接入游戏一列的依据是 `Boot.unity` 里挂了哪些 Installer：当前已提交版本挂了 Dialogue、Monster、Player、Quest 四个；Exploration 的 Installer 在工作区接线中、尚未提交。
-各模块说明按 2026-09-26 的工作区写成，其中走 / 跑切换、沉浸模式、探索 HUD、任务接取 / 完成通知、支线 2002 属于另一会话尚未提交的改动，以实际合入为准；合入后把这句删掉。
+各模块说明按 2026-09-26 的工作区写成，其中走 / 跑切换、沉浸模式、探索 HUD、任务接取 / 完成通知、支线 2002、对白键盘 / 手柄操作（交互键改 E / F）与 Esc 关面板属于另一会话尚未提交的改动，以实际合入为准；合入后把这句删掉。
 
 ## 怎么维护
 
