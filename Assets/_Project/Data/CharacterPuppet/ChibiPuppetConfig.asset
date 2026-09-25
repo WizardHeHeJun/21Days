@@ -16,6 +16,6 @@ MonoBehaviour:
   moveStopSpeed: 0.05
   sampleWindow: 0.1
   facingDeadZone: 0.01
-  walkCycleSpeedPerUnit: 0.8
+  walkCycleSpeedPerUnit: 0.53
   walkRateMin: 0.8
-  walkRateMax: 1.6
+  walkRateMax: 2.8
