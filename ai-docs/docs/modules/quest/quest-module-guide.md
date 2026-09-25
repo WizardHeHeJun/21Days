@@ -14,9 +14,9 @@ maturity: seed
 ## 职责边界
 
 **做**：任务表 → 激活（前置 + 主线唯一）→ 目标推进 → 完成连锁；HUD 常驻任务栏 + 屏幕指引（悬浮 / 贴边箭头）；
-任务面板（列表 + 详情 + 追踪切换）；与对话联动（对话结束推进 TalkTo）；场景到达点判定；存档分区。
+任务面板（列表 + 详情 + 追踪切换）；与对话联动（对话结束推进 TalkTo）；场景到达点判定；存档分区；接取 / 完成通知（经 Core `INotificationService`）。
 
-**不做**（本期非目标，见 [`prd.md`](../../../../PRP/quest-system/prd.md)）：任务奖励、失败与限时、接取 / 完成弹窗通知、
+**不做**（本期非目标，见 [`prd.md`](../../../../PRP/quest-system/prd.md)）：任务奖励、失败与限时、
 已完成任务列表页、任务对话内容、寻路距离、多语言。
 
 ## 运行时类分工
@@ -30,15 +30,16 @@ maturity: seed
 | `QuestService` | **对外门面**：转发上报 / 追踪、写回存档、按固定顺序发布事件 | 根作用域单例 + `IGameService` |
 | `QuestSceneBinder` | 入口点：`sceneLoaded` 扫场景登记 `QuestLocation`；缓存 `Camera.main`；解析目标世界坐标（`QuestTarget`） | 根作用域入口点（`AsSelf`） |
 | `QuestTarget` | 只读结构体：测距用 `Position`（脚底/地点）+ 标记与投影用 `Anchor`（头顶） | `QuestSceneBinder.TryResolveTarget` 产出 |
-| `QuestTargetMarker` | 世界空间标记 MonoBehaviour：`Show(Vector3)/Hide()`，朝向相机由预制体自带 `CameraBillboard` 负责 | `QuestHudPresenter` 实例化并驱动 |
+| `QuestTargetMarker` | 世界空间标记 MonoBehaviour：`Show(Vector3)/Hide()`，朝向相机由预制体自带 `CameraBillboard` 负责 | `QuestHudPresenter` 实例化并驱动；沉浸模式（`IHudVisibility.IsHudHidden`）下与对白期间一样隐藏，贴边箭头随 Hud 面板由 UIService 隐藏 |
 | `QuestLocation` | 场景组件：地点键 + 半径，供到达判定与指引 | 场景物体 |
 | `QuestObjectiveDriver` | 入口点：订阅对话结束 → 上报 TalkTo；每帧对到达型当前目标测距 → 上报 ReachLocation | 根作用域入口点 |
 | `QuestGuidanceMath` | 静态纯函数：视口坐标 → 屏内悬浮 / 屏外贴边+箭头；直线距离取整 | `QuestHudPresenter` 调 |
 | `QuestHudView` | `UIView`（Hud 层）：任务栏 + 指引标识，只显示与抛事件 | `IUIService` 实例化 |
-| `QuestHudPresenter` | 入口点：`BootCompletedEvent` 后开 HUD 常驻并实例化世界标记；订阅四个事件刷新文字；每帧摆标记 / 算指引；对白中隐藏 | 根作用域入口点 |
+| `QuestHudPresenter` | 入口点：`BootCompletedEvent` 后开 HUD 常驻并实例化世界标记、挂任务键（`Gameplay/Journal`）订阅并把第一条键盘绑定写进 HUD 键位提示；订阅四个事件刷新文字；每帧摆标记 / 算指引；对白中隐藏；点任务栏或按任务键开面板 | 根作用域入口点 |
+| `QuestNotificationPresenter` | 入口点：订阅 `QuestActivatedEvent` / `QuestCompletedEvent`，经 `service.Content.TryGet` 取任务标题，按 `QuestConfig` 的两条格式拼好交给 `INotificationService.Show`；`BootCompletedEvent` 之前的事件（启动时激活首条任务）不弹 | 根作用域入口点 |
 | `QuestPanelView` | `UIView`（Panel 层）：列表 + 详情 + 追踪按钮，只显示与抛事件 | `IUIService` 实例化 |
-| `QuestPanelController` | 开关面板会话：持世界暂停令牌 + 关 Gameplay 图；把面板事件转成 `service.Track/Untrack` | 根作用域单例 |
-| `QuestConfig` | SO：指引留白 / 悬浮偏移 / 距离刷新间隔 / 标记抬升与高度 / 标记预制体地址 / HUD 与面板固定文案 | `Data/Quest/QuestConfig.asset` |
+| `QuestPanelController` | 开关面板会话：持世界暂停令牌 + 关 Gameplay 图；把面板事件转成 `service.Track/Untrack`；被 Esc（Core `UICancelRouter`）从外部关掉时经 `OnClosed` 收尾 | 根作用域单例 |
+| `QuestConfig` | SO：指引留白 / 悬浮偏移 / 距离刷新间隔 / 标记抬升与高度 / 标记预制体地址 / HUD 与面板固定文案 / 接取与完成通知文案格式 | `Data/Quest/QuestConfig.asset` |
 | `QuestSaveData` / `QuestProgressData` | 存档分区（纯 DTO） | `rules.CaptureInto` 产出 |
 | 四个事件（`QuestActivatedEvent` 等） | `readonly struct`，一文件一个 | `QuestInstaller.InstallEvents` 注册 broker |
 | `QuestInstaller` | `GameplayInstaller`：注册以上全部 | Boot 场景 `GameBootstrap` 物体 |
@@ -59,8 +60,19 @@ maturity: seed
 表现：QuestHudPresenter.Tick → binder.TryResolveTarget（得 Position 测距 / Anchor 标记）→ marker.Show(Anchor) 常驻摆位
       → SceneCamera.WorldToViewportPoint(Anchor) → QuestGuidanceMath.Solve
       → 屏内：hud.HideGuidance，只留世界标记；屏外：hud.SetGuidance 贴边箭头 + 距离，标记仍留在目标处（被相机裁掉）；
-      对白中两者都隐藏；HUD 点击 → QuestPanelController.OpenAsync → SetList/SetDetail
+      对白中两者都隐藏；HUD 点击 / 任务键 Gameplay/Journal → QuestPanelController.OpenAsync → SetList/SetDetail
+      关闭：面板返回按钮 → QuestPanelController.CloseAsync；Esc（UI/Cancel）→ UICancelRouter → IUIService.CloseTopAsync → QuestPanelView.OnClosed → 控制器收尾
 ```
+
+## 重置进度（ResetProgress）
+
+`QuestService.ResetProgress()`（`QuestService.cs:161`）把全部任务打回「新开局」：清空待发布的事件缓冲 →
+`rules.Restore(new QuestSaveData())`（一份全新的空分区）→ `rules.ActivateAvailable()` → 写回存档分区 →
+补发事件（每条重新激活的任务一条 `Activated`，进行中任务各一条计数归零的 `Progressed`，至少一条
+`TrackingChanged` 让 HUD 与面板整体刷新）。`IsReady == false` 时记 Warn 并忽略，不抛异常。这是**内存重置**，
+不涉及读盘 / 写盘（本期没有落盘存档）。首个调用方是 `Game.IsometricExploration.ExplorationControlsPresenter`
+的「重置进度」确认流程（见 `isometricexploration-module-guide.md`），随后紧跟 `Game.Loot.LootService.Reset()`
+把物资箱一起合上、`IGameFlow.GoToAsync<MonsterEncounterState>()` 重进场景。
 
 ## 依赖方向
 
@@ -82,6 +94,9 @@ maturity: seed
 - **指引数学用 `Game.Core.Simulation.GameMath` 而非 `Mathf`/`Math`**：Runtime 有「重放确定性」lint 规则禁用原生数学库，
   `QuestGuidanceMath` 改用 `GameMath.Atan2/Min/Abs/Floor`；弧度转角度的换算常量本地写字面值
   （`QuestGuidanceMath.cs:18`），半数进位用 `(int)GameMath.Floor(d + 0.5f)` 而非原生四舍五入（会做银行家舍入）。
+- **任务键挂在 `QuestHudPresenter` 而不是 `QuestPanelController`**：控制器不是入口点，没有「启动完成后」的时机挂动作订阅；
+  HUD 入口点已有 `BootCompletedEvent` 时机、「点任务栏开面板」的同一条入口与错误处理，键位提示也写在它持有的 HUD 上。
+  面板开着时 Gameplay 图被关，所以任务键只开不关；关闭交给 Esc 与返回按钮（`QuestHudPresenter.ShouldOpenOnJournal`）。
 - **`QuestPanelView.OnClosed`**：面板可能被 `IUIService.CloseTopAsync` 等外部路径关掉（不经过
   `QuestPanelController.CloseAsync`），这个事件让 Controller 仍能收尾暂停令牌与恢复输入图；Controller 自己关时
   先摘掉这个监听，避免同一次关闭收尾两次（`PRP/quest-system/prp.md` 第 7 节）。
@@ -121,6 +136,8 @@ maturity: seed
 | EditMode | `.../QuestCatalogTests.cs`（5） | 真实表构造、TalkTo 对话缺失抛错 |
 | EditMode | `.../QuestSaveDataTests.cs`（5） | 存档序列化往返、未知 id 跳过 |
 | EditMode | `.../QuestGuidanceMathTests.cs`（9） | 屏内 / 屏外贴边 / 相机后翻转 / 距离取整 |
+| EditMode | `.../QuestHudPresenterTests.cs`（4） | 任务键开面板判定、键位提示取第一条键盘绑定 |
+| EditMode | `.../QuestNotificationPresenterTests.cs`（4） | 通知文案格式化：正常 / 空格式 / 格式写坏不抛 / 标题为空 |
 | Showcase | `Tests/Showcase/Quest/QuestShowcase.cs` | HUD 指引、对白与地点联动、面板暂停、追踪切换（肉眼验收） |
 | 验证场景 | `Scenes/Verify/Quest.unity` | 独立验证场景（透视相机、`player`、Elder/Traveler、两个 `QuestLocation`） |
 

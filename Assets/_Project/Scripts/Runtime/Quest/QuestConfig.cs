@@ -1,4 +1,4 @@
-// 职责：任务系统的表现参数（屏幕边缘指引留白、悬浮偏移、距离刷新间隔、头顶标记高度与预制体地址、HUD 与面板的固定文案）。
+// 职责：任务系统的表现参数（屏幕边缘指引留白、悬浮偏移、距离刷新间隔、头顶标记高度与预制体地址、HUD 与面板的固定文案、接取 / 完成通知文案）。
 // 为什么新建：任务系统首次落地（PRP/quest-system）；DialogueConfig / UIConfig 管的是对白与通用 UI，职责不同不能塞。
 using UnityEngine;
 
@@ -34,6 +34,12 @@ namespace Game.Quest
         [Tooltip("支线任务的类别标签文案。")]
         [SerializeField] private string sideKindLabel = "支线";
 
+        [Tooltip("接取任务时通知的标题格式，{0} 为任务标题。")]
+        [SerializeField] private string activatedNotificationFormat = "接取任务：{0}";
+
+        [Tooltip("完成任务时通知的标题格式，{0} 为任务标题。")]
+        [SerializeField] private string completedNotificationFormat = "任务完成：{0}";
+
         public float EdgeMargin => edgeMargin;
         public float HoverOffset => hoverOffset;
         public float DistanceRefreshInterval => distanceRefreshInterval;
@@ -43,5 +49,7 @@ namespace Game.Quest
         public string UntrackedLabel => untrackedLabel;
         public string MainKindLabel => mainKindLabel;
         public string SideKindLabel => sideKindLabel;
+        public string ActivatedNotificationFormat => activatedNotificationFormat;
+        public string CompletedNotificationFormat => completedNotificationFormat;
     }
 }

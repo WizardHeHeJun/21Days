@@ -1,4 +1,4 @@
-// 职责：把任务模块的事件 broker、配置、内容目录、服务、面板控制器、场景绑定、目标驱动与 HUD 入口点注册进根作用域。
+// 职责：把任务模块的事件 broker、配置、内容目录、服务、面板控制器、场景绑定、目标驱动、HUD 与通知入口点注册进根作用域。
 // 为什么新建：Game.Core 不许引用 Game.Runtime，玩法类型只能经 GameplayInstaller 缝注册；DialogueInstaller 只服务对白，塞进去会让模块互相耦合。
 using Game.Core.Assets;
 using Game.Core.Boot;
@@ -83,6 +83,8 @@ namespace Game.Quest
                     resolver.Resolve<QuestConfig>(),
                     resolver.Resolve<DialogueService>(),
                     resolver.Resolve<IUIService>(),
+                    resolver.Resolve<IHudVisibility>(),
+                    resolver.Resolve<IInputService>(),
                     resolver.Resolve<IAssetService>(),
                     resolver.Resolve<IClock>(),
                     resolver.Resolve<ISubscriber<BootCompletedEvent>>(),
@@ -90,6 +92,15 @@ namespace Game.Quest
                     resolver.Resolve<ISubscriber<QuestObjectiveProgressedEvent>>(),
                     resolver.Resolve<ISubscriber<QuestCompletedEvent>>(),
                     resolver.Resolve<ISubscriber<QuestTrackingChangedEvent>>(),
+                    resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton);
+            // 接取 / 完成通知：事件 → INotificationService（Core 根作用域已注册）。工厂注册理由同上（要 ITelemetryScope）。
+            builder.RegisterEntryPoint(resolver => new QuestNotificationPresenter(
+                    resolver.Resolve<QuestService>(),
+                    resolver.Resolve<QuestConfig>(),
+                    resolver.Resolve<INotificationService>(),
+                    resolver.Resolve<ISubscriber<BootCompletedEvent>>(),
+                    resolver.Resolve<ISubscriber<QuestActivatedEvent>>(),
+                    resolver.Resolve<ISubscriber<QuestCompletedEvent>>(),
                     resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton);
         }
 

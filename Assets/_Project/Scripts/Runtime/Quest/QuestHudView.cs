@@ -32,6 +32,8 @@ namespace Game.Quest
         [SerializeField] private RectTransform guidanceArrow;
         [Tooltip("到目标的距离文字，如「12 m」。")]
         [SerializeField] private TMP_Text distanceLabel;
+        [Tooltip("任务键键位提示（如「Tab」），运行时由 QuestHudPresenter 按输入绑定赋值。可空：不显示提示。")]
+        [SerializeField] private TMP_Text keyHint;
 
         private bool visible = true;
 
@@ -92,6 +94,15 @@ namespace Game.Quest
             if (distance != null) distanceLabel.text = distance;
         }
 
+        /// <summary>设置任务键键位提示；空串时隐藏提示物体（没有键盘绑定就不显示一个空框）。启动完成时调一次。</summary>
+        public void SetKeyHint(string text)
+        {
+            if (keyHint == null) return;
+            bool show = !string.IsNullOrEmpty(text);
+            keyHint.text = show ? text : string.Empty;
+            if (keyHint.gameObject.activeSelf != show) keyHint.gameObject.SetActive(show);
+        }
+
         public void HideGuidance()
         {
             if (guidanceRoot != null && guidanceRoot.gameObject.activeSelf) guidanceRoot.gameObject.SetActive(false);
@@ -107,7 +118,7 @@ namespace Game.Quest
             if (!value) HideGuidance();
         }
 
-        // 逐个点名缺失字段，预制体按名字接线时一眼看出漏了哪个。guidanceArrow 可空。
+        // 逐个点名缺失字段，预制体按名字接线时一眼看出漏了哪个。guidanceArrow、keyHint 可空。
         private void Validate()
         {
             var missing = new List<string>();

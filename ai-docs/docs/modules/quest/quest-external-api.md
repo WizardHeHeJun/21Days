@@ -24,6 +24,7 @@ maturity: seed
 | `GetOrdered` | `void GetOrdered(List<QuestProgress> buffer)` | 清空后填入：当前主线（若有）→ 支线按接取序号升序；只含进行中；未就绪只清空 |
 | `InProgress` | `IReadOnlyList<QuestProgress> InProgress { get; }` | 进行中任务，按接取序号升序；**内部缓存，`Report` 后会重建，不要跨上报持有遍历** |
 | `Content` | `QuestContent Content { get; }` | 任务内容；未就绪时抛 `InvalidOperationException` |
+| `ResetProgress` | `void ResetProgress()` | 把全部任务重置回新开局（内存重置，不涉及读写盘）：新分区 → 重新激活 → 补发 `Activated`/`Progressed`/`TrackingChanged` 事件；未就绪记 Warn 并忽略 |
 
 `Report` 是其它模块上报进度的**唯一入口**：无论对话联动、场景到达点还是自定义计数，都调这一个方法，
 不各自维护任务状态。键的语义由 `QuestObjectiveKind` 决定：`TalkTo` 传对话编号的字符串形式，
@@ -41,6 +42,9 @@ maturity: seed
 四个事件在同一次操作（初始化 / 上报 / 追踪）结束、存档分区写回**之后**统一按
 `Activated → Progressed → Completed → TrackingChanged` 顺序发布，订阅者读到的一定是操作后的完整状态。
 订阅按 `EventConventions.cs` 第 5 条：`ISubscriber<T>.Subscribe(...).AddTo(bag)`，句柄进 `DisposableBag` 自行释放。
+
+`QuestActivatedEvent` / `QuestCompletedEvent` 已由模块内 `QuestNotificationPresenter` 转成顶部通知（Core `INotificationService`），
+别的模块不要再为这两个事件自己弹通知，否则会弹两遍。
 
 ## `Game.Quest.QuestLocation`（场景组件）
 
@@ -72,7 +76,7 @@ maturity: seed
 | `OpenAsync` | `UniTask OpenAsync(CancellationToken ct = default)` | 已开或正在开时直接返回；开着期间持世界暂停令牌 + 关 Gameplay 输入图 |
 | `CloseAsync` | `UniTask CloseAsync()` | 恢复输入图（仅当进来前是开的）→ 释放暂停 → 退订；没开时空操作 |
 
-一般不直接调：HUD 点击已接好 `QuestHudPresenter → panel.OpenAsync()`。要加快捷键 / 代码触发才直接调这个。
+一般不直接调：HUD 点击与任务键（`Gameplay/Journal`，Tab / 手柄 Select）都已接好 `QuestHudPresenter → panel.OpenAsync()`。面板开着时 Gameplay 图被关，任务键不负责关闭；关闭走 Esc（Core `UICancelRouter` → `CloseTopAsync`，面板经 `QuestPanelView.OnClosed` 收尾）与面板上的返回按钮。代码触发才直接调这个。
 
 ## 调用时机与前置条件
 

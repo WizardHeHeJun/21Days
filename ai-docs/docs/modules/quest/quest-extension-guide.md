@@ -18,7 +18,7 @@ maturity: seed
 | 一种新的目标完成条件类型 | `quest.xml` 枚举 + `QuestObjectiveKind` + `QuestRules.Report` + 上报点 | 是 |
 | 新的指引目标来源（非地点 / 非对话 NPC） | `QuestSceneBinder.TryResolveTarget` | 是 |
 | 换 HUD / 面板 / 标记美术 | 对应预制体的子物体，字段名不变 | 否 |
-| 调表现参数（指引留白、悬浮偏移、刷新间隔、固定文案） | `QuestConfig.asset` 字段 | 否 |
+| 调表现参数（指引留白、悬浮偏移、刷新间隔、固定文案、通知文案） | `QuestConfig.asset` 字段 | 否 |
 
 ## 新增一条任务
 
@@ -71,6 +71,7 @@ maturity: seed
 | `guidanceRoot` | 指引标识根（`RectTransform`，锚点须在 HUD 根中心） |
 | `guidanceArrow` | 屏外箭头（可空：不显示箭头） |
 | `distanceLabel` | 距离文字 |
+| `keyHint` | 任务键键位提示（TMP，可空）；运行时由 `QuestHudPresenter` 按 `Gameplay/Journal` 第一条键盘绑定写入（如「Tab」），没有键盘绑定时隐藏 |
 
 `QuestPanelView`（`Prefabs/UI/QuestPanelView.prefab`，地址 `QuestPanelView`）：
 
@@ -85,6 +86,7 @@ maturity: seed
 | `objectiveTemplate` | 目标行模板（子物体 `Mark`(TMP)、`Text`(TMP)），运行时隐藏、按需复用 |
 | `trackButton` / `trackLabel` | 追踪 / 取消追踪按钮及文案 |
 | `closeButton` | 关闭按钮 |
+| `defaultSelected`（`UIView` 基类字段） | 打开后键盘 / 手柄默认选中项，当前拖的是 `trackButton`（列表项是运行时复制的，预制体里拖不到） |
 
 列表项与目标行都是复用池（按需 `Instantiate`，多余的隐藏），不要改成每次销毁重建。
 
@@ -103,6 +105,7 @@ maturity: seed
 | `locationMarkerHeight`（1.5） | 地点目标（或无 Collider 的 NPC）头顶标记离地高度（米） |
 | `targetMarkerAddress`（"QuestTargetMarker"） | 世界空间目标标记预制体的 Addressables 地址，要与预制体登记的地址一致 |
 | `untrackedLabel` / `mainKindLabel` / `sideKindLabel` | HUD / 面板固定文案 |
+| `activatedNotificationFormat`（"接取任务：{0}"） / `completedNotificationFormat`（"任务完成：{0}"） | 接取 / 完成通知标题格式，`{0}` 为任务标题；留空则只显示标题，写坏（如 `{1}`）退回「格式原文 + 标题」不抛 |
 
 ## 不该从哪扩
 

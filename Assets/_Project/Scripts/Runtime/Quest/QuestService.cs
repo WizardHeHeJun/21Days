@@ -149,6 +149,53 @@ namespace Game.Quest
             Flush();
         }
 
+        /// <summary>
+        /// 把全部任务进度重置回「新开局」：用一份全新的 <see cref="QuestSaveData"/> 走 <c>rules.Restore</c>，
+        /// 再像初始化那样 <c>ActivateAvailable</c>（追踪自动回到默认主线），写回存档分区后发布事件。
+        /// <para>
+        /// 规则的 Restore 本身不抛事件，所以这里补发：每条重新激活的任务一条 Activated（规则自己抛）、
+        /// 每条进行中任务一条计数归零的 Progressed、至少一条 TrackingChanged——HUD 与面板据此整体刷新。
+        /// </para>
+        /// 未就绪时记 Warn 并忽略。
+        /// </summary>
+        public void ResetProgress()
+        {
+            if (!IsReady)
+            {
+                Log.Warn("QuestService 未就绪，忽略任务进度重置。");
+                telemetry.TrackWarn("reset_ignored", TelemetryProps.Of(("reason", "not_ready")));
+                return;
+            }
+
+            // 重置前还没发布的事件描述的是旧进度，发出去只会让订阅者先刷一遍马上作废的状态。
+            pendingActivated.Clear();
+            pendingProgressed.Clear();
+            pendingCompleted.Clear();
+            pendingTracking.Clear();
+
+            rules.Restore(new QuestSaveData());
+            rules.ActivateAvailable();
+
+            IReadOnlyList<QuestProgress> active = rules.InProgress;
+            for (int i = 0; i < active.Count; i++)
+            {
+                QuestProgress progress = active[i];
+                if (!progress.HasCurrentObjective) continue;
+
+                pendingProgressed.Add(new QuestObjectiveProgressedEvent(
+                    progress.Id, progress.ObjectiveIndex, progress.Count, progress.CurrentObjective.RequiredCount, false));
+            }
+
+            // 表里没有可接主线时 ActivateAvailable 不会改追踪，这里保证至少发一次，让 HUD 切回「未追踪」。
+            if (pendingTracking.Count == 0)
+            {
+                pendingTracking.Add(new QuestTrackingChangedEvent(rules.TrackedId));
+            }
+
+            Flush();
+            telemetry.Track("progress_reset", ("quests", active.Count), ("tracked", rules.TrackedId));
+        }
+
         public bool TryGet(int id, out QuestProgress progress)
         {
             if (!IsReady)
