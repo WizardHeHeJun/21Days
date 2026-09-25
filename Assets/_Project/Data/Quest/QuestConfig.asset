@@ -15,6 +15,9 @@ MonoBehaviour:
   edgeMargin: 48
   hoverOffset: 80
   distanceRefreshInterval: 0.2
+  markerLift: 0.3
+  locationMarkerHeight: 1.5
+  targetMarkerAddress: QuestTargetMarker
   untrackedLabel: "\u672A\u8FFD\u8E2A\u4EFB\u52A1"
   mainKindLabel: "\u4E3B\u7EBF"
   sideKindLabel: "\u652F\u7EBF"
