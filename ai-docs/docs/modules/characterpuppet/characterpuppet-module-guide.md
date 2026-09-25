@@ -110,7 +110,7 @@ ResolveFacing → 变了才 ChibiPuppet.SetFacing(left) → 根 localScale.x = �
 
 - **滞回**：静止时速度 ≥ `moveStartSpeed`（0.15）才起步；走动中速度 ≤ `moveStopSpeed`（0.05）才停（`ChibiPuppetMotionRules.cs:13`）。两阈值之间保持原状态，防止慢速时来回抖。
 - **dt ≤ 0 视为静止**，速度记 0。
-- **播放速率**：`clamp(speed × 0.8, 0.8, 1.6)`（`ChibiPuppetMotionRules.cs:41`），走快了腿摆得快，但不会快到抽搐或慢到滑步。
+- **播放速率**：`clamp(speed × 0.53, 0.8, 2.8)`（`ChibiPuppetMotionRules.cs:41`），走快了腿摆得快，但不会快到抽搐或慢到滑步。
 - **朝向死区**：沿右方向的分量绝对值 ≤ 死区时保持上次朝向（`ChibiPuppetMotionRules.cs:30`），纯纵向移动不乱翻。
 
 ### 朝向来源两种
@@ -179,7 +179,7 @@ ResolveFacing → 变了才 ChibiPuppet.SetFacing(left) → 根 localScale.x = �
 | 类别 | 路径 | 覆盖 |
 | --- | --- | --- |
 | EditMode | `Assets/_Project/Scripts/Tests/EditMode/CharacterPuppet/ChibiPuppetMotionRulesTests.cs` | 无位移静止、起步阈值、走动中阈值上保持、停步阈值、dt ≤ 0、朝向死区保持与符号、播放速率夹取 |
-| Showcase | `Assets/_Project/Scripts/Tests/Showcase/CharacterPuppet/CharacterPuppetShowcase.cs` | 待机 → 右走（Walk、`localScale.x > 0`）→ 左走翻面 → 停下回 Idle → 时停期间 Idle 的 normalizedTime 仍增长 |
+| Showcase | `Assets/_Project/Scripts/Tests/Showcase/CharacterPuppet/CharacterPuppetShowcase.cs` | 待机 → 右走（Walk、`localScale.x > 0`）→ 左走翻面 → 停下回 Idle → 3 单位/秒走路（Animator `Speed` ≈ 1.59）→ 5 单位/秒奔跑（≈ 2.65 且高于走路）→ 停下回 Idle → 时停期间 Idle 的 normalizedTime 仍增长 |
 | 验证场景 | `Assets/_Project/Scenes/Verify/CharacterPuppet.unity` | 正交相机 + 空物体 `Puppet` 下挂 `ChibiPuppet_Player`，无 `facingSource`（走位移投影分支） |
 
 - Showcase 不加载 Boot 场景（`LoadBootScene => false`），由协程逐帧推根节点；时停检查在 `finally` 里恢复 `timeScale = 1`。

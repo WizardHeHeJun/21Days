@@ -67,7 +67,7 @@
   - 玩家：棕发、肤色、蓝衣、深蓝裤。
   - 巡逻者：深灰发、肤色、灰衣、深蓝裤。
 - **SampleScene**：玩家与巡逻者已换成小人，原来的整张纸片隐藏保留。
-- **验证场景**：`Assets/_Project/Scenes/Verify/CharacterPuppet.unity`，一只小人按「站 2 秒 → 右走 → 左走 → 停下 → 模拟对话暂停」回放，检查动画与朝向，已通过。
+- **验证场景**：`Assets/_Project/Scenes/Verify/CharacterPuppet.unity`，一只小人按「站 2 秒 → 右走 → 左走 → 停下 → 走路 3 → 奔跑 5 → 停下 → 模拟对话暂停」回放，检查动画、朝向与走跑步频差别，已通过。
 
 ## 6. 已知限制与还没做的
 
