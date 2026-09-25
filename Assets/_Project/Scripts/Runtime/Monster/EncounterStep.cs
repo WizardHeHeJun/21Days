@@ -76,6 +76,17 @@ namespace Game.Monster
 
         public void End() => IsActive = false;
 
+        /// <summary>
+        /// 把玩家逻辑位置改成表现层碰撞解算后的结果（PRP/exploration-whitebox 波 9）。
+        /// 只允许 EncounterSceneView.OnPlayerBlocked 的回写调用：它是白盒阶段「障碍不在确定性内核里」的补丁，
+        /// 其他玩法不要借它挪人（挪人用 PlayerRules.Reset）。未激活时忽略。
+        /// </summary>
+        public void CorrectPlayerPosition(Vector2 logicPosition)
+        {
+            if (!IsActive) return;
+            player.Model.Position = logicPosition;
+        }
+
         public void Step(in SimulationContext context)
         {
             if (!IsActive || (PendingResult != Result.None && !ResultConsumed))
@@ -88,7 +99,8 @@ namespace Game.Monster
                 command.Axis0,
                 command.HasButton(InputCommand.ButtonSneak),
                 command.HasButton(InputCommand.ButtonDisguise),
-                command.HasButton(InputCommand.ButtonAttack));
+                command.HasButton(InputCommand.ButtonAttack),
+                command.HasButton(InputCommand.ButtonRun));
             bool attacked = player.Step(in playerIntent, context.DeltaTime);
             PlayerSnapshot target = player.Model.Snapshot;
             MonsterModel enemy = monster.Model;
