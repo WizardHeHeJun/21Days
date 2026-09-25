@@ -12,6 +12,7 @@ GameObject:
   - component: {fileID: 9060995086850005518}
   - component: {fileID: 1661932406416951625}
   - component: {fileID: 6949966574331484844}
+  - component: {fileID: 3333044366874680784}
   m_Layer: 5
   m_Name: StartButton
   m_TagString: Untagged
@@ -37,7 +38,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: -120}
-  m_SizeDelta: {x: 420, y: 120}
+  m_SizeDelta: {x: 240, y: 44}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &9060995086850005518
 CanvasRenderer:
@@ -60,7 +61,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0.2, g: 0.42, b: 0.78, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -98,13 +99,13 @@ MonoBehaviour:
     m_SelectOnRight: {fileID: 0}
   m_Transition: 1
   m_Colors:
-    m_NormalColor: {r: 1, g: 1, b: 1, a: 1}
-    m_HighlightedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
-    m_PressedColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 1}
-    m_SelectedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
-    m_DisabledColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 0.5019608}
+    m_NormalColor: {r: 0.2, g: 0.42, b: 0.78, a: 1}
+    m_HighlightedColor: {r: 0.62, g: 0.5, b: 0.18, a: 1}
+    m_PressedColor: {r: 0.15, g: 0.315, b: 0.585, a: 1}
+    m_SelectedColor: {r: 0.62, g: 0.5, b: 0.18, a: 1}
+    m_DisabledColor: {r: 0.22, g: 0.22, b: 0.22, a: 0.5}
     m_ColorMultiplier: 1
-    m_FadeDuration: 0.1
+    m_FadeDuration: 0.08
   m_SpriteState:
     m_HighlightedSprite: {fileID: 0}
     m_PressedSprite: {fileID: 0}
@@ -121,6 +122,20 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &3333044366874680784
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2225683456766027409}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5eba8bf4392d9604c82dadd4d7108786, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  pressedScale: 0.94
+  seconds: 0.08
 --- !u!1 &5345141666556256523
 GameObject:
   m_ObjectHideFlags: 0
@@ -213,8 +228,8 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 48
-  m_fontSizeBase: 48
+  m_fontSize: 24
+  m_fontSizeBase: 24
   m_fontWeight: 400
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
@@ -452,5 +467,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8c906e2a351252c40bdb8eee2f650d6e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  transition: 0
+  defaultSelected: {fileID: 6949966574331484844}
   titleLabel: {fileID: 2555564619625975690}
   startButton: {fileID: 6949966574331484844}

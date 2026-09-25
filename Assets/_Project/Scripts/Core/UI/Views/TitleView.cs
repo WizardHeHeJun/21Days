@@ -38,6 +38,9 @@ namespace Game.Core.UI.Views
         /// <summary>标题是主界面，走 Panel 层（全屏，会盖住下面的面板）。</summary>
         public override UILayer Layer => UILayer.Panel;
 
+        /// <summary>标题是流程起点，Esc 关掉它玩家就卡在空屏上，所以不让 UICancelRouter 关。</summary>
+        public override bool CloseOnCancel => false;
+
         public override UniTask OnOpenAsync(object arg, CancellationToken ct)
         {
             if (startButton != null)

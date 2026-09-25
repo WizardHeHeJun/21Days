@@ -12,6 +12,7 @@
         "MessagePipe",
         "MessagePipe.VContainer",
         "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.InputSystem",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

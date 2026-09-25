@@ -40,6 +40,13 @@ namespace Game.Tests.Showcase
         private int stepIndex;
         private bool capturing;
         private bool bootLoaded;
+#if UNITY_EDITOR
+        // 回放期间锁住程序集重载（见 AcquireReloadLock）。静态计数 = 本类当前持有的锁数，防止嵌套 / 重复解锁；
+        // 实例标记保证一条用例最多加一次、解一次。
+        private static int reloadLockCount;
+        private static bool exitPlayHookInstalled;
+        private bool holdsReloadLock;
+#endif
 
         /// <summary>模块名，PascalCase（报告目录用它的小写形式）。</summary>
         protected abstract string Module { get; }
@@ -76,6 +83,7 @@ namespace Game.Tests.Showcase
         [UnitySetUp]
         public IEnumerator ShowcaseSetUp()
         {
+            AcquireReloadLock();
             stepIndex = 0;
             bootLoaded = false;
             testStartTime = Time.realtimeSinceStartup;
@@ -94,27 +102,97 @@ namespace Game.Tests.Showcase
         [UnityTearDown]
         public IEnumerator ShowcaseTearDown()
         {
-            EndCapture();
-
-            int failures = report == null ? 0 : report.CurrentTestFailureCount;
-            int exceptions = report == null ? 0 : report.CurrentTestExceptionCount;
-            string reportPath = report == null ? "(未生成)" : report.Write();
-
-            if (overlay != null)
+            // try/finally：写报告、销毁物体或 Assert.Fail 抛出时也要解锁，否则编辑器会一直不编译。
+            try
             {
-                UnityEngine.Object.Destroy(overlay.gameObject);
-                overlay = null;
+                EndCapture();
+
+                int failures = report == null ? 0 : report.CurrentTestFailureCount;
+                int exceptions = report == null ? 0 : report.CurrentTestExceptionCount;
+                string reportPath = report == null ? "(未生成)" : report.Write();
+
+                if (overlay != null)
+                {
+                    UnityEngine.Object.Destroy(overlay.gameObject);
+                    overlay = null;
+                }
+
+                DestroyTracked();
+                yield return null;
+
+                Log($"回放结束：检查点失败 {failures} 个，异常 {exceptions} 条，报告 {reportPath}");
+                if (failures > 0 || exceptions > 0)
+                {
+                    Assert.Fail($"{failures} 个检查点失败，{exceptions} 条异常；报告：{reportPath}");
+                }
             }
-
-            DestroyTracked();
-            yield return null;
-
-            Log($"回放结束：检查点失败 {failures} 个，异常 {exceptions} 条，报告 {reportPath}");
-            if (failures > 0 || exceptions > 0)
+            finally
             {
-                Assert.Fail($"{failures} 个检查点失败，{exceptions} 条异常；报告：{reportPath}");
+                ReleaseReloadLock();
             }
         }
+
+        /// <summary>
+        /// 回放期间锁住程序集重载。回放在 Play 模式里跑，别的会话此时保存 .cs 会触发「Play 中重编译 + 域重载」，
+        /// UTF 的测试协程随域重载被丢掉，用例既不失败也不结束、进度永远卡住（2026-09-26 实测：Dialogue 回放卡 4 分钟）。
+        /// 锁住后改动只排队，回放结束解锁时再编译。只在编辑器里生效。
+        /// </summary>
+        private void AcquireReloadLock()
+        {
+#if UNITY_EDITOR
+            if (holdsReloadLock)
+            {
+                return;
+            }
+
+            holdsReloadLock = true;
+            reloadLockCount++;
+            UnityEditor.EditorApplication.LockReloadAssemblies();
+
+            // 兜底：SetUp 中途抛异常、TearDown 没跑到时，退出 Play 模式把本类加的锁全部还掉。
+            if (!exitPlayHookInstalled)
+            {
+                exitPlayHookInstalled = true;
+                UnityEditor.EditorApplication.playModeStateChanged += ReleaseAllOnExitPlay;
+            }
+#endif
+        }
+
+        /// <summary>与 <see cref="AcquireReloadLock"/> 对称；本实例没加过锁、或计数已归零时什么都不做（防重复解锁）。</summary>
+        private void ReleaseReloadLock()
+        {
+#if UNITY_EDITOR
+            if (!holdsReloadLock)
+            {
+                return;
+            }
+
+            holdsReloadLock = false;
+            if (reloadLockCount <= 0)
+            {
+                return;
+            }
+
+            reloadLockCount--;
+            UnityEditor.EditorApplication.UnlockReloadAssemblies();
+#endif
+        }
+
+#if UNITY_EDITOR
+        private static void ReleaseAllOnExitPlay(UnityEditor.PlayModeStateChange change)
+        {
+            if (change != UnityEditor.PlayModeStateChange.ExitingPlayMode)
+            {
+                return;
+            }
+
+            while (reloadLockCount > 0)
+            {
+                reloadLockCount--;
+                UnityEditor.EditorApplication.UnlockReloadAssemblies();
+            }
+        }
+#endif
 
         /// <summary>
         /// 走一步：记进报告、更新 Overlay、打日志、执行 act，然后停顿让开发者看清这一步的表现。
