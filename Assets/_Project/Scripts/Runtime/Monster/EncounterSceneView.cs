@@ -9,6 +9,8 @@ namespace Game.Monster
     public sealed class EncounterSceneView : MonoBehaviour
     {
         private const float MinFlipDelta = 0.0001f;
+        private const float DebugPanelMargin = 16f;
+        private const float DebugPanelWidth = 480f;
 
         [SerializeField] private Transform playerSpawn;
         [SerializeField] private Transform[] patrolPoints;
@@ -33,6 +35,18 @@ namespace Game.Monster
         [Tooltip("按场景 X 方向的移动翻转角色纸片：左移 flipX，右移还原。只在 XZ 等距场景勾选；2D 验证场景保持关闭")]
         [SerializeField] private bool flipByMoveDirection;
 
+        // —— PRP/exploration-whitebox 波 9：白盒遮挡碰撞（表现层解算、回写逻辑位置；取舍见 EncounterCollision 文件头）。
+        [Tooltip("玩家纸片会被这些层的碰撞体挡住（先 X 后 Z 胶囊扫掠，贴墙滑动）；为 0 时不碰撞，行为与旧版一致。只在 XZ 模式生效")]
+        [SerializeField] private LayerMask obstacleMask;
+        [Tooltip("碰撞胶囊下沿离脚底的高度；要高于单级台阶（灰盒 0.3），否则台阶和坡面会被当成墙")]
+        [SerializeField, Min(0f)] private float obstacleBottomOffset = 0.35f;
+        [Tooltip("碰撞胶囊上沿离脚底的高度；低于它的桥底 / 甲板底不挡人")]
+        [SerializeField, Min(0f)] private float obstacleTopOffset = 1.5f;
+        [Tooltip("碰撞胶囊半径，与 player 根节点 CapsuleCollider 一致")]
+        [SerializeField, Min(0f)] private float obstacleRadius = 0.3f;
+        [Tooltip("单帧场景位移超过这个距离视为瞬移（读档 / 重置 / 回放挪位），不做碰撞解算，只贴地")]
+        [SerializeField, Min(0f)] private float obstacleTeleportDistance = 1.5f;
+
         private PlayerModel player;
         private MonsterModel monster;
         private Sprite placeholderSprite;
@@ -43,8 +57,12 @@ namespace Game.Monster
         private MonsterMode lastMode = (MonsterMode)255;
         private bool lastSneaking;
         private bool lastDisguised;
+        private GUIStyle rightAlignedLabel;
 
         public event Action OnBackClicked;
+
+        /// <summary>玩家这一帧被遮挡物挡住时发出，参数是修正后的逻辑 XY；由持有 EncounterStep 的一方回写（CorrectPlayerPosition）。</summary>
+        public event Action<Vector2> OnPlayerBlocked;
 
         public Transform PlayerBody => playerBody;
         public Transform MonsterBody => monsterBody;
@@ -187,7 +205,7 @@ namespace Game.Monster
 
             Vector3 lastPlayerScene = playerBody.position;
             Vector3 lastMonsterScene = monsterBody.position;
-            playerBody.position = ToScenePosition(player.Position, lastPlayerScene);
+            playerBody.position = ResolvePlayerScenePosition(lastPlayerScene);
             monsterBody.position = ToScenePosition(monster.Position, lastMonsterScene);
             if (flipByMoveDirection)
             {
@@ -224,6 +242,35 @@ namespace Game.Monster
         private Vector2 ToLogicPosition(Vector3 position) =>
             useXZPlane ? new Vector2(position.x, position.z) : new Vector2(position.x, position.y);
 
+        // 玩家投影：先按逻辑位置贴地；开了 obstacleMask 且不是瞬移时，再做 XZ 扫掠，被挡就对修正后的 XZ 重新贴地并回写逻辑位置。
+        private Vector3 ResolvePlayerScenePosition(Vector3 lastScene)
+        {
+            Vector3 desired = ToScenePosition(player.Position, lastScene);
+            if (!useXZPlane || obstacleMask.value == 0)
+            {
+                return desired;
+            }
+
+            float dx = desired.x - lastScene.x;
+            float dz = desired.z - lastScene.z;
+            if (dx * dx + dz * dz > obstacleTeleportDistance * obstacleTeleportDistance)
+            {
+                return desired;
+            }
+
+            Vector3 slid = EncounterCollision.Slide(lastScene, desired, obstacleRadius, obstacleBottomOffset,
+                obstacleTopOffset, obstacleMask);
+            if (slid.x == desired.x && slid.z == desired.z)
+            {
+                return desired;
+            }
+
+            var corrected = new Vector2(slid.x, slid.z);
+            Vector3 final = new Vector3(slid.x, ResolveGroundY(corrected, lastScene.y), slid.z);
+            OnPlayerBlocked?.Invoke(ToLogicPosition(final));
+            return final;
+        }
+
         private Vector3 ToScenePosition(Vector2 position, Vector3 current)
         {
             if (!useXZPlane)
@@ -231,18 +278,25 @@ namespace Game.Monster
                 return new Vector3(position.x, position.y, current.z);
             }
 
-            float y = current.y;
-            if (groundMask.value != 0)
+            return new Vector3(position.x, ResolveGroundY(position, current.y), position.y);
+        }
+
+        // 贴地：从当前高度上方往下打射线，按 maxStepHeight 裁决是否采用新高度；groundMask 为 0 时保持当前高度。
+        private float ResolveGroundY(Vector2 position, float currentY)
+        {
+            if (groundMask.value == 0)
             {
-                var origin = new Vector3(position.x, current.y + groundProbeHeight, position.y);
-                if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, groundProbeHeight + groundProbeDepth, // lint-ok: 纯表现，只定纸片高度，不参与判定
-                        groundMask, QueryTriggerInteraction.Ignore))
-                {
-                    y = EncounterProjection.ResolveGroundY(current.y, hit.point.y, maxStepHeight);
-                }
+                return currentY;
             }
 
-            return new Vector3(position.x, y, position.y);
+            var origin = new Vector3(position.x, currentY + groundProbeHeight, position.y);
+            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, groundProbeHeight + groundProbeDepth, // lint-ok: 纯表现，只定纸片高度，不参与判定
+                    groundMask, QueryTriggerInteraction.Ignore))
+            {
+                return EncounterProjection.ResolveGroundY(currentY, hit.point.y, maxStepHeight);
+            }
+
+            return currentY;
         }
 
         private static void ApplyFlip(SpriteRenderer renderer, float previousX, float currentX)
@@ -262,10 +316,18 @@ namespace Game.Monster
                 return;
             }
 
-            GUI.Label(new Rect(16f, 16f, 480f, 28f), playerStatus);
-            GUI.Label(new Rect(16f, 44f, 480f, 28f), monsterStatus);
-            GUI.Box(new Rect(16f, 76f, 208f, 20f), string.Empty);
-            GUI.Box(new Rect(20f, 80f, 200f * monster.Alert, 12f), string.Empty);
+            // 波 9：调试文字挪到右上「返回标题」按钮下方、右对齐，让出左上角给任务栏 HUD。
+            if (rightAlignedLabel == null)
+            {
+                rightAlignedLabel = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperRight };
+            }
+
+            float left = Screen.width - DebugPanelMargin - DebugPanelWidth;
+            float right = Screen.width - DebugPanelMargin;
+            GUI.Label(new Rect(left, 64f, DebugPanelWidth, 28f), playerStatus, rightAlignedLabel);
+            GUI.Label(new Rect(left, 92f, DebugPanelWidth, 28f), monsterStatus, rightAlignedLabel);
+            GUI.Box(new Rect(right - 208f, 124f, 208f, 20f), string.Empty);
+            GUI.Box(new Rect(right - 204f, 128f, 200f * monster.Alert, 12f), string.Empty);
             if (GUI.Button(new Rect(Screen.width - 130f, 16f, 114f, 40f), "返回标题"))
             {
                 OnBackClicked?.Invoke();

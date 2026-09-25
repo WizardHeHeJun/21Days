@@ -39,5 +39,48 @@ namespace Game.Tests.EditMode.Monster
             }
             finally { Object.DestroyImmediate(pc); Object.DestroyImmediate(mc); }
         }
+
+        // 波 9：表现层碰撞回写——激活时改写玩家逻辑位置。
+        [Test]
+        public void CorrectPlayerPosition_WhenActive_OverridesPlayerPosition()
+        {
+            var pc = ScriptableObject.CreateInstance<PlayerConfig>();
+            var mc = ScriptableObject.CreateInstance<MonsterConfig>();
+            try
+            {
+                var model = new PlayerModel();
+                var player = new PlayerRules(pc, model, NullTelemetryScope.Instance);
+                var enemy = new MonsterRules(mc, new MonsterModel(), new RandomService(21ul), NullTelemetryScope.Instance);
+                var step = new EncounterStep(player, enemy);
+                step.Begin(Vector2.zero, new[] { new Vector2(10f, 0f) });
+
+                step.CorrectPlayerPosition(new Vector2(2f, -0.6f));
+
+                Assert.That(model.Position, Is.EqualTo(new Vector2(2f, -0.6f)));
+            }
+            finally { Object.DestroyImmediate(pc); Object.DestroyImmediate(mc); }
+        }
+
+        // 波 9：遭遇未激活（离场后 / 尚未 Begin）时回写无效，避免场景残留事件改写下一次遭遇的玩家。
+        [Test]
+        public void CorrectPlayerPosition_WhenInactive_IsIgnored()
+        {
+            var pc = ScriptableObject.CreateInstance<PlayerConfig>();
+            var mc = ScriptableObject.CreateInstance<MonsterConfig>();
+            try
+            {
+                var model = new PlayerModel();
+                var player = new PlayerRules(pc, model, NullTelemetryScope.Instance);
+                var enemy = new MonsterRules(mc, new MonsterModel(), new RandomService(21ul), NullTelemetryScope.Instance);
+                var step = new EncounterStep(player, enemy);
+                step.Begin(new Vector2(1f, 1f), new[] { new Vector2(10f, 0f) });
+                step.End();
+
+                step.CorrectPlayerPosition(new Vector2(5f, 5f));
+
+                Assert.That(model.Position, Is.EqualTo(new Vector2(1f, 1f)));
+            }
+            finally { Object.DestroyImmediate(pc); Object.DestroyImmediate(mc); }
+        }
     }
 }
