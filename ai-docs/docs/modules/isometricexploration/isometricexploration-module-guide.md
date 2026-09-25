@@ -20,7 +20,7 @@ IsometricExploration 是 `SampleScene` 中的 2.5D / 3D 混合原型。
 - 把 Player/Monster 的确定性 XY 逻辑坐标投影到等距场景 XZ 平面。
 
 这仍是场景表现原型，不是正式探索系统。战斗状态与确定性回放复用 Player/Monster；
-本模块不增加背刺处决、障碍物视线、物理碰撞判定、寻路或正式动画。
+本模块不增加背刺处决、障碍物视线、寻路或正式动画；玩家遮挡碰撞只有波 9 的表现层白盒实现（见「已知限制」）。
 
 ## 当前组成
 
@@ -30,6 +30,16 @@ IsometricExploration 是 `SampleScene` 中的 2.5D / 3D 混合原型。
 | `SmoothCameraFollow` | `Assets/_Project/Scripts/Runtime/IsometricExploration/SmoothCameraFollow.cs:8` | 保持初始偏移并平滑跟随目标 |
 | `IsometricExplorationConfig` | `Assets/_Project/Scripts/Runtime/IsometricExploration/IsometricExplorationConfig.cs:8` | 保存移动速度、排序兼容参数和相机缓动时间 |
 | `IsometricPlayerController3D` | `Assets/_Project/Scripts/Tests/Showcase/IsometricExploration/IsometricPlayerController3D.cs:10` | 把 `Gameplay/Move` 输入应用到 3D `Rigidbody` |
+| `ExplorationInstaller` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationInstaller.cs:20` | 本模块的 GameplayInstaller：注册 `ExplorationHudPresenter` / `ExplorationControlsPresenter` / `ExplorationCompassPresenter` 三个入口点与 `IsometricExplorationConfig` |
+| `ExplorationHudView` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationHudView.cs:21` | 探索常驻 Hud：左下角「沉浸」切换按钮 + 走跑 / 摇杆 / 触屏三键 / 重置 / 交互提示 / 万向标（全部可空容错），`VisibleWhenHudHidden = true` |
+| `ExplorationHudPresenter` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationHudPresenter.cs:23` | 启动后打开探索 HUD，驱动沉浸模式的进入 / 退出与埋点 `immersive_changed` |
+| `ExplorationControlsPresenter` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationControlsPresenter.cs:30` | 入口点：摇杆 / 触屏三键按平台显隐、走跑标签跟随 `PlayerModel.IsRunning`、物资箱焦点提示、沉浸时整体隐藏控件区、驱动「重置进度」确认流程 |
+| `ExplorationCompassPresenter` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationCompassPresenter.cs:29` | 入口点：场景加载时登记 `ExplorationPointOfInterest`，每帧把屏外兴趣点摆到画布边缘（对象池复用模板），沉浸时整体跳过 |
+| `ExplorationCompassRules` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationCompassRules.cs:12` | 纯函数：视口坐标 → 屏内不画 / 屏外贴边位置与箭头角度，复用 `QuestGuidanceMath.Solve` |
+| `ExplorationPointOfInterest` / `PoiKind` | `ExplorationPointOfInterest.cs:16` / `PoiKind.cs:6` | 场景组件：万向标指引目标（Npc / Crate / Location），`Crate` 类型在同物体 `SupplyCrate` 打开后不再可见 |
+| `ExplorationConfirmView` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationConfirmView.cs:20` | Popup 层通用确认弹窗（首个用途「重置进度」），`WaitAsync` 交回确认 / 取消，被动关闭按取消处理不抛异常 |
+| `SceneOccluder` | `Assets/_Project/Scripts/Runtime/IsometricExploration/SceneOccluder.cs` | 场景组件（波 9）：挡住相机视线时把 `sharedMaterial` 换成半透明材质，离开换回 |
+| `OccluderFadePresenter` | `Assets/_Project/Scripts/Runtime/IsometricExploration/OccluderFadePresenter.cs` | 入口点（波 9）：每帧相机→玩家胸口射线，命中的 `SceneOccluder` 淡出、离开恢复 |
 | `StandaloneEncounterController` | `Assets/_Project/Scripts/Runtime/Monster/StandaloneEncounterController.cs:12` | 直接播放场景时，用现有遭遇规则读取 Gameplay 输入并推进角色、敌人与战斗 |
 
 `IsometricPlayerController3D` 位于 Showcase 程序集，只用于当前原型。
@@ -55,20 +65,74 @@ Encounter
 └─ PatrolPoint1
 ```
 
+`Crates`（场景根节点，与 `Encounter` 平级）下 `Crate_A` / `Crate_B` / `Crate_C` 三只物资箱（归 Loot 模块，
+见 `ai-docs/docs/modules/loot/loot-module-guide.md`）；每只箱子根物体额外挂 `ExplorationPointOfInterest`
+（`kind = Crate`）供本模块的万向标指引：
+
+```text
+Crates
+├─ Crate_A（SupplyCrate + SupplyCrateMarker + ExplorationPointOfInterest(Crate) + BoxCollider）
+│  ├─ Closed / Opened（两套外观）
+│  └─ Marker（头顶标记：SpriteRenderer + CameraBillboard）
+├─ Crate_B（同构）
+└─ Crate_C（同构）
+```
+
+场景里 3 个 NPC 与 2 个 `QuestLocation` 同样挂了 `ExplorationPointOfInterest`（`kind = Npc` / `Location`），
+共 8 个兴趣点由 `ExplorationCompassPresenter` 统一登记；`Location` / `Npc` 恒可见，`Crate` 类型箱子打开后
+不再指引（`ExplorationPointOfInterest.IsVisible`）。
+
 `Environment_Graybox`（灰盒环境几何体）与 `GlobalVolume`（后处理，见下文「表现层」）是与 `Encounter`
 平级的场景根节点，不挂在 `Encounter` 下；`EncounterSceneView` 不引用它们，纯表现，不参与玩法判断：
 
 ```text
 Environment_Graybox（场景根）
 ├─ Ground / Wall_Back / Wall_Left / Tower / Stairs
-└─ Fence / Cone_1..3 / Bench_1..2
+├─ Fence / Cone_1..3 / Bench_1..2
+└─ MultiLevel（波 9：多层平台，对标「旅行小记」的上下层）
+   ├─ Ground_East / Deck_Upper(SceneOccluder) / Ramp_South / Bridge_West(SceneOccluder)
+   ├─ Stairs_West（Stairs_West_Step_1..9）
+   └─ Railings（Rail_Bridge_S/N、Rail_Deck_N/E/S1/S2/W1/W2，均挂 SceneOccluder）
 
 GlobalVolume（场景根，Global + ExplorationVolumeProfile）
 ```
 
+`MultiLevel` 各件（全是原生 Cube，Layer `Ground`，材质复用 `Art/Materials/Graybox/`；地面顶面 y = 4.89）：
+
+| 物体 | 中心 / 缩放 | 覆盖范围与用途 |
+| --- | --- | --- |
+| `Ground_East` | (26, 4.79, 3.4) / (14, 0.2, 30) | 地面向东扩到 x 33（x 19..33、z −11.6..18.4） |
+| `Deck_Upper` | (25, 7.69, 12) / (10, 0.4, 10) | 上层甲板 x 20..30、z 7..17，顶面 7.89、底面 7.49，人能从下面走过 |
+| `Ramp_South` | (23.5, 6.2496, 3.0527) / (3, 0.3, 8.544)，绕 X −20.556° | 坡道 x 22..25，顶面从 (z −1, y 4.89) 升到 (z 7, y 7.89)，接甲板南沿 |
+| `Stairs_West_Step_1..9` | 第 i 级中心 x = 20 − 0.8i + 0.4、顶面 y = 7.89 − 0.3i，缩放 (0.8, 0.3, 3)，z 15.5 | 甲板西沿 x 20 下到地面 x 12.8，z 14..17，每级 0.3 |
+| `Bridge_West` | (17.25, 7.69, 10.25) / (5.5, 0.4, 2.5) | 桥 x 14.5..20、z 9..11.5，顶面 7.89，西端顶到 Tower 东面，桥下净高 2.6 |
+| `Rail_Bridge_S/N` | y 8.39，z 9.04 / 11.46，缩放 (5.5, 1, 0.08) | 桥两侧栏杆 |
+| `Rail_Deck_*` | y 8.39，厚 0.08、高 1 | 甲板四沿栏杆；南沿留坡道口（x 22..25），西沿留桥口（z 9..11.5）与楼梯口（z 14..17） |
+
+同波搬家：`QuestLocation_Lookout` → (25, 7.89, 12)（甲板中央，「观察神秘生物」的瞭望点上楼）；
+`Crate_B` → (28, 7.89, 15)（甲板上）。
+
 `Environment_Graybox` 下全部物体统一放在新建 Layer `Ground`（slot 8，`ProjectSettings/TagManager.asset`），
 `Encounter/EncounterSceneView.groundMask` 只勾这一层，供贴地射线专用；这一层只用于贴地探测，
 不代表玩法碰撞层，新增环境物体记得同样放进 `Ground` 层，否则角色纸片走上去不会贴地。
+波 9 起 `EncounterSceneView.obstacleMask` 也只勾 `Ground`：这一层里「高于脚底 0.35、低于脚底 1.5」的部分会挡住玩家
+（墙、围栏、长椅、路障、栏杆、塔）；0.3 的台阶、坡面、桥底与甲板底不挡。NPC / 物资箱在 Default 层，不挡路。
+新加的可站立平台若底面离地低于 1.5 m，人会被它从侧面挡住——想让人从下面走过就把底面放到 1.5 m 以上。
+
+## 遮挡半透明（波 9）
+
+`OccluderFadePresenter`（`Runtime/IsometricExploration/OccluderFadePresenter.cs`，`ExplorationInstaller` 注册的入口点）
+每帧从 `QuestSceneBinder.SceneCamera` 向 `PlayerAnchor + (0, 0.8, 0)`（胸口）打一条 `Physics.RaycastNonAlloc`
+（只打 `Ground` 层，预分配 8 个结果；Collider → `SceneOccluder` 查找结果按 Collider 缓存，场景卸载清缓存），
+命中挂了 `SceneOccluder` 的物体就 `SetFaded(true)`，上一帧淡出、本帧没命中的恢复。纯表现，不回写玩法状态。
+
+`SceneOccluder`（`Runtime/IsometricExploration/SceneOccluder.cs`）挂在要淡出的几何体上，字段 `fadedMaterial`
+（灰盒拖 `Art/Materials/Graybox/M_Graybox_Faded.mat`：URP Lit 透明、Alpha 0.35、不投影不写深度）；
+只切 `Renderer.sharedMaterial` 引用，原材质在 Awake 缓存，不改材质资产内容；禁用时自动恢复。
+当前挂在 `Bridge_West`、`Deck_Upper` 与 `Railings` 下 8 段栏杆（1 m 高的深色栏杆同样会把人压住，只淡桥面不够）。
+
+构图提示：相机→胸口的视线俯角约 40°，离地 2.6 m 的桥 / 甲板挡住的是它**北侧**约 2～3 m 的人，
+站在桥正中下方反而看得见（回放用 (17.25, 12.3) 验证桥淡出）。
 
 角色（`player` / `enerme`）当前层级；根节点已改为**脚底**、缩放归一 `(1, 1, 1)`，
 Y = 地面高度 `4.8884`（`Assets/Scenes/SampleScene.unity:4581`，`CapsuleCollider.center (0, 0.8, 0)`、
@@ -105,6 +169,75 @@ player（根节点，脚底，缩放 (1, 1, 1)，y = 4.8884）
 **环境纸片（`PropRoot` + `SpriteRenderer` + `CameraBillboard` 层级）已停用、待美术替换**：原六个
 「室内*」纸片物体仍在场景中但已停用（未删除，未来正式表现如仍需要 2D 占位可重新启用）；正式/灰盒
 环境改用 `Environment_Graybox` 下的 3D 几何体，见下文「表现层」与扩展指南的「新增灰盒/正式环境模型的步骤」。
+
+## 探索 HUD 与沉浸模式
+
+参考《明日方舟》旅行小记左下角按钮：一键隐藏全部 HUD 与世界空间交互标记，只留沉浸按钮本身。
+
+- **Core 能力**：`IHudVisibility`（`Core/UI/IHudVisibility.cs`，由 `UIService` 实现）+ 事件 `HudVisibilityChangedEvent`。
+  沉浸时 UIService 把 `VisibleWhenHudHidden == false` 的 Hud 面板 CanvasGroup 置 alpha 0 / 不可交互 / 不挡射线，不关面板。
+- **入口**：`ExplorationHudPresenter` 在 `BootCompletedEvent` 后 `OpenAsync<ExplorationHudView>()` 并常驻；
+  切换来源：按钮、`Gameplay/Immersive` 动作（键鼠 H / 手柄右摇杆按下）；退出来源：沉浸中 `Gameplay/Cancel` 且没有对白
+  （`ShouldExitOnCancel` 纯函数）、`DialogueService.OnStarted`。动作只在启动完成时订阅一次。
+- **世界空间物件**：Dialogue 由 `DialogueSceneBinder` 订阅事件后给已登记的 `DialogueInteractable.SetHiddenByHud`，
+  标记 / 名字 / 台词气泡据此隐藏，焦点在沉浸时为空；Quest 的 `QuestHudPresenter` 在沉浸时隐藏 `QuestTargetMarker`。
+  玩家 / 巡逻者的 `NameTag`（角色头顶名字）目前**不**随沉浸隐藏。
+- **埋点**：模块名 `exploration`，`immersive_changed`（`hidden`、`source` = button / key / cancel / dialogue），
+  `hud_open_failed`（Error）。
+- **接线要求**：`ExplorationInstaller` 挂到 `Assets/_Project/Scenes/Boot.unity` 的 `GameBootstrap` 上，排在 `QuestInstaller` 之后；
+  预制体 `Assets/_Project/Prefabs/UI/ExplorationHudView.prefab` 在 Addressables `UI` 组，地址 `ExplorationHudView`。
+
+```text
+ExplorationHudView（RectTransform 铺满，CanvasGroup，ExplorationHudView）
+├─ ImmersiveButton（左下角锚点；Image + Button + CanvasGroup）
+│  └─ Label（TextMeshProUGUI「沉浸」/「退出沉浸」）
+├─ ControlsRoot（CanvasGroup = controlsGroup，沉浸时整体隐藏）
+│  ├─ Stick（左下，OnScreenStick 绑 `<Gamepad>/leftStick`）── Knob
+│  ├─ TouchButtons（潜行 SneakButton / 伪装 DisguiseButton / 攻击 AttackButton，各自 OnScreenButton）
+│  ├─ ResetButton（左上，任务栏下方）
+│  └─ InteractPrompt（屏幕下方居中 TMP，anchoredPosition (0, 72)、sizeDelta 320×48，与对白模块的交互提示
+│     `DialogueInteractHudView` 同位；两者由 `SupplyCrateFocus` / `DialogueInteractionFocus` 的让位规则互斥，不会同时出现）
+├─ RunSlot（右下角锚点，独立 CanvasGroup = runToggleGroup，不在 ControlsRoot 下）
+│  └─ RunToggle（OnScreenButton 绑 `<Gamepad>/leftStickPress`）── Label（「散步」/「奔跑」）
+└─ CompassRoot（铺满，不挡射线）
+   └─ CompassMarkerTemplate（运行时隐藏；子 Arrow + 子 Label，由呈现器 Instantiate 复制）
+```
+
+## 探索控件与万向标（波 3 追加）
+
+- **控件区**（`ExplorationControlsPresenter`）：`BootCompletedEvent` 后与 `ExplorationHudPresenter`
+  并发 `OpenAsync<ExplorationHudView>()`（`IUIService` 保证返回同一实例）。
+  **PC 优先（波 6，2026-09-26）**：触屏控件（摇杆 / 三键 / 走跑按钮）默认仅 `IPlatformService.IsTouchPrimary` 显示，
+  三者统一取 `IsTouchPrimary || config.ShowStickOnDesktop`（`ShowStickOnDesktop` 是开发开关，默认关），
+  走跑按钮经 `SetRunToggleVisible` 切 `RunToggle` 物体；PC 走跑走 `Gameplay/Run`（左 Ctrl / 手柄左摇杆按下）。
+  预制体与代码保留作移动端移植的底子。走跑标签每帧读 `PlayerModel.IsRunning`（潜行时不改标签，只显示模式），只在变化时才写 TMP；
+  订阅 `Game.Loot.SupplyCrateFocus.OnFocusChanged` 显隐交互提示（文案取 `LootConfig.PromptText`）；
+  沉浸时 `HudVisibilityChangedEvent` 驱动 `hud.SetControlsVisible(false)`，同时切 `ControlsRoot` 与
+  `RunToggle` 两个 CanvasGroup。
+- **重置进度**（波 8 挪到左下角，2026-09-26）：`ResetButton` 锚点改为左下角（同 `ImmersiveButton`
+  的 anchorMin/Max/pivot 均为 (0,0)），`anchoredPosition (48, 136)`、`sizeDelta 220×56`，正好压在
+  `ImmersiveButton` 上方，与左上角任务栏 `QuestHudView` 不再叠在一起。点 `ResetButton` → `OpenAsync<ExplorationConfirmView>(config.ResetMessage)` →
+  `WaitAsync` 等选择 → 关闭弹窗 → 确认则 `QuestService.ResetProgress()` → `LootService.Reset()` →
+  `IGameFlow.GoToAsync<MonsterEncounterState>()`（退出当前遭遇状态卸载场景，重新加载后玩家回出生点，
+  箱子随 `LootResetEvent` 合上）；取消 / 弹窗被关掉都按「取消」处理，不抛异常。埋点
+  `progress_reset` / `progress_reset_cancelled` / `progress_reset_failed`（Error）。
+- **万向标**（`ExplorationCompassPresenter` + `ExplorationCompassRules`）：`sceneLoaded` 扫描全部
+  `ExplorationPointOfInterest`（含未激活），标签在登记时按 `IsometricExplorationConfig.CompassLabelMax`
+  截好；每帧对可见兴趣点 `Camera.WorldToViewportPoint` → `ExplorationCompassRules.TryPlace`（屏内返回
+  `false` 不画，屏外 / 身后贴边并给出箭头角度，复用 `QuestGuidanceMath.Solve`）；标记走对象池，只在
+  需要更多槽位时从 `CompassMarkerTemplate` 复制，不逐帧销毁重建。`CompassRoot` / `CompassMarkerTemplate`
+  未接线时报一次 Error 并埋 `compass_template_missing`，之后每帧静默跳过。沉浸时整体隐藏（`HideFrom(0)`）。
+  同边标记按 56 单位最小间距错开（`ExplorationCompassRules.SpreadAlongEdges`，常量
+  `ExplorationCompassPresenter.CompassMinSpacing`，待并入 `IsometricExplorationConfig`）：`Tick` 先把
+  全部摆位收进预分配的 `framePlacements`，跑完 `SpreadAlongEdges` 再落到标记池，避免屏幕右缘等多个
+  标签互相压住；同边按沿边坐标排序做最小间距推挤，推到边角时整体前移并钳制在画布内，不越界。
+- **埋点补充**：`controls_bound`（`touch`）、`poi_bound`（`count`，场景加载时一次）、
+  `compass_open_failed` / `controls_open_failed`（Error）。
+- **接线要求补充**：`ExplorationInstaller` 的 `Config` 拖 `Data/IsometricExploration/IsometricExplorationConfig.asset`；
+  控件区 / 万向标依赖 `Game.Loot.SupplyCrateFocus` / `LootService` / `LootConfig`（`LootInstaller`）、
+  `Game.Quest.QuestSceneBinder` / `QuestService`（`QuestInstaller`）、`Game.Player.PlayerModel`
+  （`PlayerInstaller`），`ExplorationInstaller` 必须排在这些注册器之后；Addressables `UI` 组另增地址
+  `ExplorationConfirmView`（预制体 `Assets/_Project/Prefabs/UI/ExplorationConfirmView.prefab`）。
 
 ## 表现层（渲染分档 / 光影 / 后处理）
 
@@ -229,11 +362,15 @@ Post Processing 开，Background 颜色等于雾色。改构图（FOV / 旋转 /
 
 | 参数 | 当前值 | 用途 |
 | --- | ---: | --- |
-| `MoveSpeed` | 3 | 角色 XZ 平面移动速度 |
 | `CameraSmoothTime` | 0.2 | 摄像机平滑跟随时间 |
+| `ShowStickOnDesktop` | false | 开发开关：桌面平台也显示触屏控件（摇杆 / 三键 / 走跑按钮）；正式只在触屏平台显示 |
+| `CompassEdgeMargin` | 48 | 万向标贴屏幕边时的内缩像素 |
+| `CompassLabelMax` | 6 | 万向标标签最多显示几个字，超出截断；0 = 不显示标签 |
+| `RunLabel` / `WalkLabel` | "奔跑" / "散步" | 走跑按钮标签文案 |
+| `ResetMessage` / `ResetConfirmText` / `ResetCancelText` | 见资产 | 重置确认弹窗正文与两个按钮文案 |
 
-`SortingScale` 是早期 2D 排序验证的兼容字段，当前 `SampleScene` 不读取它。
-在旧排序验证代码退出工作区后，应连同该字段一起删除。
+移动速度归 `PlayerConfig`；原 `MoveSpeed` / `SortingScale` 两个无人读取的字段已在波 6 删除
+（Showcase 原型控制器 `IsometricPlayerController3D` 改用本地常量 3）。
 
 ## 依赖方向
 
@@ -260,7 +397,30 @@ InputCommand
   → PlayerModel / MonsterModel（XY）
   → EncounterSceneView（XY → XZ）
   → player / enerme Transform
+
+PlayerModel.IsRunning
+  → ExplorationControlsPresenter.Tick
+  → ExplorationHudView.SetRunLabel
+
+SupplyCrateFocus.OnFocusChanged（Game.Loot）
+  → ExplorationControlsPresenter
+  → ExplorationHudView.SetPrompt（文案取 LootConfig.PromptText）
+
+ExplorationPointOfInterest（场景，含 SupplyCrate 只读 IsOpened）
+  → ExplorationCompassPresenter.Tick
+  → Camera.WorldToViewportPoint → ExplorationCompassRules.TryPlace（复用 QuestGuidanceMath.Solve）
+  → CompassRoot 下的标记实例
+
+ResetButton
+  → ExplorationConfirmView.WaitAsync
+  → QuestService.ResetProgress() + LootService.Reset()
+  → IGameFlow.GoToAsync<MonsterEncounterState>()
 ```
+
+`ExplorationControlsPresenter → Game.Loot / Game.Quest / Game.Player / Game.Monster`（读
+`SupplyCrateFocus` / `LootService` / `LootConfig`、`QuestService`、`PlayerModel`、`MonsterEncounterState`
+类型）；`ExplorationCompassPresenter → Game.Quest`（`QuestSceneBinder.SceneCamera`）、
+`ExplorationPointOfInterest → Game.Loot`（只读 `SupplyCrate.IsOpened`）。均为单向读取，反向禁止。
 
 ## 已知限制
 
@@ -270,14 +430,24 @@ InputCommand
 - 摄像机跟随只做位置缓动，没有边界、前视、死区或碰撞避让；
 - 3D 控制器属于原型，不进入正式可重放玩法状态，遭遇时会被停用；
 - 场景引用保存在 `EncounterSceneView`，重命名角色不会触发运行时名称查找；
-- 玩法规则不读取 Rigidbody 或 Collider，角色会穿过环境碰撞体；
+- 遮挡碰撞是**白盒实现**（波 9）：`EncounterSceneView` 在表现层用 `EncounterCollision.Slide`（先 X 后 Z 胶囊扫掠，
+  贴墙滑动）解算玩家纸片位移，被挡时经 `OnPlayerBlocked` → `EncounterStep.CorrectPlayerPosition` 回写逻辑位置。
+  取舍：障碍不在确定性内核里，同机同场景可复现，跨机 / 跨平台回放不保证逐位一致；正式版要把关卡障碍数据放进内核。
+  怪物不解算碰撞（巡逻路线本身避开障碍）；单帧位移超过 `obstacleTeleportDistance`（1.5 m）视为瞬移，不解算只贴地；
 - 当前没有专门的 PlayMode 自动化测试，场景接线仍需在 Unity 中试玩确认；
 - 贴地投影是表现层：`groundMask` 只影响 `EncounterSceneView` 里纸片的世界 Y，逻辑层没有高度、
-  不做障碍或视线判定，玩法规则依旧不读取贴地结果；
+  不做视线判定，玩法规则依旧不读取贴地结果（怪物感知不会被桥 / 墙挡住）；
 - 两角色重合时 `NameTag` 会叠在一起，没有做避让或层级排序。
 
 ## 验证入口
 
+- EditMode（沉浸）：`Assets/_Project/Scripts/Tests/EditMode/IsometricExploration/ExplorationHudPresenterTests.cs`；
+  UIService 的沉浸行为见 `Tests/EditMode/Core/UIServiceTests.cs` 的 `SetHudHidden_*` 用例。
+- EditMode（控件与万向标）：`.../ExplorationCompassRulesTests.cs`（11 条：`TryPlace` 屏内 / 贴边 / 身后翻转 /
+  远角内缩 / 相机平面兜底、`TrimLabel` 截断、`ShouldShowStick` 平台判定、`SelectRunLabel` 走跑标签选择、
+  `SpreadAlongEdges` 同边推开 / 不同边互不影响 / 推到边角钳制不越界）。
+- Showcase（波 4）：`Assets/_Project/Scripts/Tests/Showcase/Exploration/ExplorationShowcase.cs`（波 4 落地中，
+  覆盖 V1–V5：走跑切换（`Gameplay/Run` 脉冲）、桌面下触屏控件全部隐藏、万向标进出屏、开箱提示与通知、重置后任务与箱子回到初始）。
 - EditMode：`Assets/_Project/Scripts/Tests/EditMode/Monster/EncounterSceneViewTests.cs`
   （含 `EncounterProjection` 的 5 条 `ResolveGroundY` + 4 条 `ResolveFlipX` 用例）。
 - 渲染分档守卫：`Assets/_Project/Scripts/Tests/EditMode/Rendering/RenderPipelineTiersTests.cs`
@@ -287,6 +457,9 @@ InputCommand
   `EncounterSceneView.PlayerScenePosition.y` 相对地面抬升 ≥0.55，再 `Reset` 回平地确认落回地面高度。
 - 当前 Showcase 直接加载 `Assets/Scenes/SampleScene.unity`；固定验证场景待 Unity MCP 可用后保存到
   `Assets/_Project/Scenes/Verify/IsometricExploration.unity`。
+- Showcase（波 9）：`ExplorationShowcase` 追加 `Collision_FenceBlocksPlayer`（摇杆顶围栏，z 不越过 −0.7）、
+  `MultiLevel_RampLeadsToDeck`（沿坡道走上甲板，高度单调不降、终点 y ≥ 7.8）、
+  `Occluder_FadesBridgeWhenPlayerBeneath`（人在桥后侧时桥变 `M_Graybox_Faded`，离开恢复），共 7 条。
 - Showcase 报告落 `Logs/verify/isometricexploration/`（已 gitignore，不进版本库）；「探索场景 2.5D
   表现升级」本次验证结果 PASS。
 
@@ -307,4 +480,9 @@ InputCommand
 - 改贴地参数（`groundMask` / `groundProbeHeight` / `groundProbeDepth` / `maxStepHeight`）：跑
   `EncounterSceneViewTests.cs` 里 `EncounterProjection` 的 5 条 `ResolveGroundY` + 4 条 `ResolveFlipX`
   用例与 Showcase 的 `WalkOntoStairs_RaisesBody`；
+- 改万向标摆位规则：改 `ExplorationCompassRules`（纯函数）并跑 `ExplorationCompassRulesTests`，不要在
+  `ExplorationCompassPresenter.Tick` 里另写一份判断；
+- 改控件区显隐 / 重置流程：`ExplorationControlsPresenter` 只读 `Game.Loot` / `Game.Quest` / `Game.Player`
+  的公开成员，不要反向让那些模块认识探索 HUD；
+- 加新的兴趣点或 HUD 控件：见 `isometricexploration-extension-guide.md`；
 - 提交前：运行项目 lint、刷新 Unity 编译并读取 Console 错误。

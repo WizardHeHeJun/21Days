@@ -19,6 +19,28 @@ maturity: stable
 [`developer-guide.md`](../../../../docs/developer-guide.md) 第 6 章的服务速查）。
 真玩法上线后这个模块可以整个删掉，删了框架照样跑（只有 Boot 场景上那个 `SampleInstaller` 组件要一起摘）。
 
+## 当前接线状态（2026-09-26）
+
+以下三条是实测事实，不是设计意图：
+
+1. **`SampleInstaller` 没有挂在 Boot 上**：`Assets/_Project/Scenes/Boot.unity` 的 `GameBootstrap` 物体上
+   实际挂的是 Dialogue / Monster / Player / Quest 四个 Installer，没有 `SampleInstaller`
+   （`grep SampleInstaller Boot.unity` 零命中）。
+2. **场景地址没登记**：`SampleState.SceneKey = "SampleScene_Game"` 这个地址**没有**出现在
+   Addressables Scenes 组（`Assets/AddressableAssetsData/AssetGroups/Scenes.asset` 只登记了
+   `IsometricEncounter`、`MonsterEncounter` 两条）。
+3. **标题路由被顶替**：标题「开始」现在由 `MonsterTitleRouter` 接管（订阅同一个
+   `TitleStartClickedEvent`），`SampleTitleRouter` 因为 Installer 未挂根本没进容器，不会被 VContainer
+   实例化，自然也订不上事件。
+
+**本模块保留为代码样板**（README 与 `developer-guide.md` 仍指向它作为「玩法模块长什么样」的参照），
+**不进启动链**。要试跑它需要三步：
+
+1. 在 Boot 的 `GameBootstrap` 上挂 `SampleInstaller` 组件，并把 `SampleConfig.asset` 拖进 Config 字段；
+2. 把 `Assets/_Project/Scenes/Sample.unity` 加进 Addressables Scenes 组，地址填 `SampleScene_Game`；
+3. **注意**：挂上后它与 `MonsterTitleRouter` 会同时订阅 `TitleStartClickedEvent`，两者都在容器里时
+   点「开始」会竞争（谁先注册谁的 `GoToAsync` 先跑），不要两个同时挂。
+
 ## 内部结构
 
 | 类 | 是什么 | 谁持有它 |

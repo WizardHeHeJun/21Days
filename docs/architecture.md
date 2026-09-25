@@ -6,7 +6,7 @@
 
 ## 1. 目标与约束
 
-- Unity 2022.3.62f2 LTS，2D URP，纯 C#，多人协作，Windows 与 Android 两个包体共用内容。
+- Unity 2022.3.62f2 LTS，2D URP，纯 C#，多人协作，PC（Windows）优先，Android 移植后置；两个包体共用一套内容。触屏控件按 `IPlatformService.IsTouchPrimary` 显隐，PC 阶段不显示。
 - 玩法未定，框架层先行：框架**不感知任何玩法**，玩法模块只通过框架的公开接口接入。
 - 开发管线一律用公开方案（Unity 官方包、活跃开源项目），自写只做胶水层。
 - 参考过一个成熟商业客户端的分层，借鉴的是手法（见第 6 节），不复制其代码与目录。
@@ -96,7 +96,7 @@ scripts/gen-tables.ps1    生成配置表
 Boot 场景加载
  → GameBootstrap.Awake：DontDestroyOnLoad，构建 GameLifetimeScope（根作用域）
  → IGameFlow.GoToAsync<BootState>()（启动期 Current 不为空）
- → 按注册顺序串行调用每个 IGameService.InitializeAsync（Platform → Log → Assets → Config → Save → Input → Audio → UI）
+ → 按注册顺序串行调用每个 IGameService.InitializeAsync（Platform → Log → Assets → Config → Save → Settings → Input → Audio → UI）
  → 发布 BootCompletedEvent → IGameFlow.GoToAsync<TitleState>()
 ```
 
@@ -198,7 +198,26 @@ public interface IUIService
 }
 ```
 
-四层 Canvas 各一个根节点，`Canvas Scaler` 按屏幕尺寸缩放并适配安全区。Panel 层单栈：打开全屏 Panel 时隐藏其下的 Panel；Popup 层可叠加。预制体 Addressables key 等于类名。
+四层 Canvas 各一个根节点，`Canvas Scaler` 按屏幕尺寸缩放并适配安全区。基准（用户 2026-09-26 定）：参考分辨率 1920×1080（16:9），`UIConfig.matchWidthOrHeight = 1` 按高度匹配——UI 在任何高度下比例不变，21:9 等宽屏横向扩展、两侧多看，不缩放 UI；最低支持 1280×720。Panel 层单栈：打开全屏 Panel 时隐藏其下的 Panel；Popup 层可叠加。预制体 Addressables key 等于类名。
+
+过渡预设由 `UITransition` 枚举决定，默认 `Fade`（`UIView` 上的 `[SerializeField]` 字段，Inspector 里叫 Transition）。
+
+键盘 / 手柄导航：`UIView` 上的 `defaultSelected`（Inspector 里叫 Default Selected，可空）是面板成为栈顶时 `UIService` 让自己建的 EventSystem 选中的控件——淡入完成且仍是栈顶（先 Popup 后 Panel）才选中；关掉栈顶面板后改选新栈顶的默认项，新栈顶没有默认项或栈空则清空选中。`UIView.CloseOnCancel`（虚属性，默认 Panel / Popup 层为 true）声明 Esc 能不能关它，标题、对白这类关了会卡流程的面板重写为 false。`UICancelRouter`（Core 根作用域入口点，`BootCompletedEvent` 后订阅 **UI 图**的 `Cancel.performed`）按栈顶判定：可关 → `CloseTopAsync()`；不可关 → 不动；两条栈都空 → 触发 `OnCancelWithNothingToClose`（留给暂停菜单订阅）。
+
+沉浸模式走 `IHudVisibility`（`IsHudHidden` / `SetHudHidden(bool)`，由 `UIService` 实现、同一条注册挂出）：`SetHudHidden(true)` 把已打开的 Hud 层面板里 `UIView.VisibleWhenHudHidden == false` 的全部置为 CanvasGroup alpha 0 且不吃点击（不关面板、不触发生命周期），沉浸中新开的 Hud 面板同样套用；状态真正变化时发布一次 `HudVisibilityChangedEvent(Hidden)`，世界空间标记（NPC 头顶、任务目标）订阅它或读 `IsHudHidden` 自行隐藏。它与整层开关 `IUIService.SetLayerVisible` 是两回事：后者切整层 Canvas，不区分面板。
+
+通用通知走 `INotificationService.Show(string title, string body = null, float seconds = 0f)`（`NotificationService` 实现，根作用域单例、**不是** `IGameService`）：按调用顺序排队逐条显示，`seconds ≤ 0` 取 `UIConfig.NotificationSeconds`（默认 2.5），计时用 unscaled 时间（世界暂停也照走）；待显示队列里同标题的一条会被合并替换。首次 `Show` 时才 `OpenAsync<NotificationView>()`（Top 层常驻、不全屏、卡片不挡点击），队列逻辑在纯 C# 的 `NotificationQueue`（EditMode 可测），视图只管 `ShowCard / HideCard` 的进出场动画。玩法模块只调 `Show`，不自己开 `NotificationView`。
+
+暂停菜单：`PauseMenuController`（Core 根作用域入口点，注册在 `UICancelRouter` 之后）在 `BootCompletedEvent` 后订阅 `UICancelRouter.OnCancelWithNothingToClose`（Esc）与 `Gameplay/Pause.performed`（P / 手柄 Start），满足 `ShouldOpen`（启动完成、不在沉浸、当前状态不是 `BootState` / `TitleState`、没开着）才开 `PauseMenuView`（Panel 层全屏、Esc 可关）；开着期间持 `IWorldPauseService` 令牌并关 Gameplay 图，继续 / Esc / 外部关闭统一收尾（释放令牌，进来前 Gameplay 图开着才恢复）。「回标题」先关菜单再 `GoToAsync<TitleState>()`，「退出游戏」在触屏为主的平台隐藏。设置面板：`SettingsController`（根作用域单例）`OpenAsync()` 取 `ISettingsService.Snapshot()` 作回滚点再开 `SettingsView`；音量滑条实时 `ApplyAudio()`，显示项只改 `Current`，「应用」才 `ApplyDisplay()` + `SaveAsync()`；「返回」/ Esc / 外部关闭时若有未应用改动则 `Restore(snapshot)`（音量一并回滚）。回滚规则在纯 C# 的 `SettingsEditSession`（EditMode 可测）。
+
+Esc 优先级（H11，一次 Esc 只做第一条命中的事；P 键只开不关）：
+
+| 当前情形 | Esc 的效果 | 谁处理 |
+| --- | --- | --- |
+| 栈顶面板 `CloseOnCancel = true`（任务面板、暂停菜单、设置…） | 关掉它（关暂停菜单 = 继续） | `UICancelRouter` |
+| 栈顶面板 `CloseOnCancel = false`（对白、标题） | 什么都不做 | `UICancelRouter`（Blocked） |
+| 没有面板、处于沉浸模式（含本帧刚退出沉浸） | 退出沉浸 | 沉浸开关一侧（如 `ExplorationHudPresenter` 读 Gameplay/Cancel） |
+| 以上都不是、且在玩法状态 | 打开暂停菜单 | `PauseMenuController` |
 
 ### 5.7 存档
 
@@ -216,6 +235,27 @@ public interface ISaveService
 ```
 
 JSON 文件，路径由 `IPlatformService.SaveRoot` 给出；先写临时文件再原子替换；每个分区带版本号，加载时逐版本迁移。
+
+**设置是独立档案 `settings`，不进存档槽**（落盘为 `SaveRoot/profile-settings.json`，换档、删档不影响设置）。`SettingsSaveData` 分区版本 2：音量三档、语言，加显示五项（`ResolutionWidth / ResolutionHeight` 0 = 原生、`FullScreenMode` 0 = 无边框全屏 / 1 = 窗口化、`VSync` 默认开、`TargetFrameRate` 0 = 不限，只允许 0/30/60/120/144/240）。读写只走 `ISettingsService`，不再 `ISaveService.Get<SettingsSaveData>()`：
+
+```csharp
+namespace Game.Core.Settings
+public interface ISettingsService
+{
+    SettingsSaveData Current { get; }                               // 同一实例，面板直接改字段
+    IReadOnlyList<DisplayResolution> AvailableResolutions { get; }  // 显示器分辨率去重、升序、只留 ≥1280×720
+    DisplayResolution NativeResolution { get; }                     // 原生分辨率唯一来源，面板不自己读 Unity 显示 API
+    void ApplyDisplay();   // Screen.SetResolution（值变化才调；触屏为主平台跳过）+ vSyncCount + targetFrameRate
+    void ApplyAudio();     // 三路音量推给 IAudioService
+    UniTask SaveAsync(CancellationToken ct = default);   // 写独立档案 "settings"
+    SettingsSaveData Snapshot();                    // 深拷贝，面板回滚点
+    void Restore(SettingsSaveData snapshot);        // 原地覆盖 Current，再 ApplyDisplay + ApplyAudio
+}
+```
+
+**独立档案也走版本信封与 `Migrate`**：`ReadProfileAsync / WriteProfileAsync` 的 `T` 实现 `ISaveData` 时，文件写成 `{ "version": N, "data": {...} }`；读时没有信封的旧裸对象按版本 1，存的版本低于代码版本调一次 `Migrate(stored)`，高于代码版本记 Error 并返回默认值（文件原样保留，与槽位分区「高版本拒绝」一致）；非 `ISaveData` 的 `T` 仍按裸对象读写。决定（2026-09-26）：旧存档槽里的设置分区**不做一次性搬运**（尚无真实玩家存档）。
+
+`SettingsService` 注册在 `JsonSaveService` 之后、`AudioService` 之前：启动时读档案（没有就默认、越界值纠正）并 `ApplyDisplay()`；`AudioService` 构造注入 `ISettingsService`，音量读写的就是 `Current`（setter 立即生效、不落盘）。换算规则在纯 C# 的 `DisplaySettingsMath`，Unity 显示 API 收在 `IDisplayBackend`（EditMode 测试换假实现，不真改编辑器分辨率）。窗口：`PlayerSettings` 默认 1920×1080、`FullScreenWindow`、`resizableWindow = 1`（窗口化可拖拽）。
 
 ### 5.8 输入、定时器、池、日志、音频、平台
 

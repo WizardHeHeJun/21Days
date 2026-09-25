@@ -147,6 +147,7 @@
   3. 提交前 `git diff --cached | grep -i <对方特征词>` 兜底确认零命中，提交后再确认对方的改动仍留在工作区。
   纯属自己的文件照常 `git add`。**别用 `git add -p`**：交互式在本环境跑不了。
 - 关联：`CLAUDE.md #硬规则 4`、`.claude/skills/review-change/SKILL.md #并发会话`；2026-09-15 起连续七次提交都这么做，2026-09-16 沉淀。
+- **并行改同一批文件（2026-09-26）**：这次不是提交期撞车，是**开工期**就撞了——两个会话各自派 subagent 改 Player / Input / UIService 等同一批文件，而且两边设计还不一样（字段命名、迁移路径都不同）。发现得晚一步就会互相覆盖；这次是其中一个 subagent 中途 `git status`/`git diff` 发现对方的未提交改动跟自己要改的文件重叠，主动停手，另一边才没被覆盖。正确做法：开工前先 `git status` 看工作区有没有别人的未提交改动；有就先跨会话发消息划清各自改哪些文件、谁的底层设计为准，不要各写各的等提交时再对；改共用文件前**重新 `Read`**（别信自己上一轮读到的内容，对方可能已经改过），只做最小插入，不顺手重排或重构无关部分；改完等到「编译零错误 + EditMode 全绿」这个稳定点再通知对方开工，不要在半成品状态上招呼别人接手。
 
 ## 打包期间编辑器是关的，MCP 全部不可用，验证得提前想好命令行退路
 - 现象：`/build` 要求关闭编辑器（工程锁只允许一个实例），于是打包这段时间里 `read_console`、`run_tests`、`execute_code` 全部连不上——而人往往是打完包才想起「我要怎么确认它对不对」，这时只剩一个退出码可看。
@@ -183,6 +184,7 @@
 - 根因：`UIServiceTests` 里"`OnOpenAsync` 抛异常"那条用例留下一个未被观察的 UniTask 异常，由 `UniTaskScheduler` 延迟发布到 Unity 日志系统，落在哪条用例的边界里取决于 GC 时机，于是随机砸中当时正在跑的某条——测试框架把它当成本次运行的未预期日志判失败。跑过 `execute_code` 之后尤其容易触发，动态程序集会改变 GC 时机。
 - 正确做法：清空控制台挡不住它（只是清掉已有日志，异常还没发布）；跑测试前先 `refresh_unity(force, compile="request")` 触发一次域重载，把上一轮遗留的待发布异常一起带走。看到「失败用例与报错内容风马牛不相及」这种现象先按这条排查，不要去改那条无辜用例的断言。根治要在产生异常的那条用例里把 UniTask 异常观察掉（`.Forget()` 带异常处理，或接 `UniTaskScheduler.UnobservedTaskException`），这属于 UI 测试自己的范围。
 - 关联：`Assets/_Project/Scripts/Tests/EditMode/Core/UIServiceTests.cs`、UniTask 的 `UniTaskScheduler`、`.claude/rules/unity-tests.md`；2026-09-16 做回放系统时连续踩到两次。
+- **根治（2026-09-26）**：根因是 `Core/UI/UIService.cs` 打开面板失败路径对给并发等待者准备的 `UniTaskCompletionSource` 调了 `TrySetException`——单次打开（没有别的调用方在排队等同一个 `type`）时没有等待者去读这个 completion 的结果，异常就成了「未观察」，由 GC 终结器经 `UniTaskScheduler` 延迟再发布一次，砸中当时随便哪条正在跑的用例。修法是在 `TrySetException` 之后**立刻读一次它自己的结果**（`completion.Task.GetAwaiter().GetResult()`，包一层 try/catch 吞掉同一个异常）把它标记为已观察，本次调用方仍然拿到原始异常（下面照常 `throw`），互不冲突。配了回归用例 `UIServiceTests.OpenAsync_WhenOnOpenAsyncThrows_LeavesNoUnobservedTaskException` 断言不再有未观察异常。跑测试前强制刷新域重载的做法仍然推荐（挡的是其它遗留场景），但对这一条已经不再是必需。
 
 ## 测试自己把依赖装上了，于是接线缺口全程不报
 - 现象：回放系统的验证全绿——PlayMode Showcase 2/2、EditMode 173/173，录制、状态哈希、完整快照、漂移检测逐条验过。但**真实启动路径下录出来的回放只有输入流**：状态哈希和快照全是空的，漂移检测、起点恢复、快照续跑全部空转。整个系统最核心的能力是空的，而没有任何一条验证发现得了。
@@ -207,3 +209,33 @@
 - 根因：序列化字段缺省走脚本默认值；共享组件被多个场景 / 预制体引用时，默认值等于对所有旧场景做了一次静默改动。
 - 正确做法：新字段默认值取「旧行为不变」的那个（bool 默认 `false`、数值默认「不生效」的 0），只在需要的场景里显式打开；提交前 `grep` 一下该组件的 `m_Script` guid 出现在哪些 `.unity` / `.prefab` 里，逐个确认。
 - 关联：`.claude/rules/csharp-code.md` 序列化与暴露面；code-reviewer 在 2026-09-25 的探索场景审查里抓到。
+
+## 用 MCP 在活动场景里搭 UI 预制体，散件会随场景一起保存
+- 现象：用 MCP 在 `SampleScene`（活动场景）里现搭一个 UI 预制体的层级（建 GameObject、挂组件、调 RectTransform），
+  搭完再另存为 `.prefab`；`SampleScene` 里却多出一个同名的根物体——那些散件本来就是场景里的真实 GameObject，
+  另存为预制体只是**复制**了一份，原实例仍留在场景根节点上。2026-09-26 波 3 在 `SampleScene` 里发现并删除了一个
+  遗留的 `ExplorationHudView` 根物体。
+- 根因：MCP 的 `manage_gameobject` 是对**当前打开的场景**操作，没有「预览场景」概念；在活动场景里搭好再拖成
+  Prefab（或用 `manage_prefabs` 从场景对象生成）不会自动清场景里的源实例，这一步需要额外手动删除，容易漏。
+- 正确做法：优先用 `PrefabUtility.LoadPrefabContents` / `SaveAsPrefabAsset` 这类走**预览场景**的 API 建预制体
+  （不经过任何已打开的真实场景）；确实要在活动场景里现搭再转存的，转存完立刻把场景里的源实例删掉，保存场景前
+  跑 `git diff -U0 -- <场景文件> | grep m_Name` 复核有没有多出不该在的根物体。
+- 关联：`.claude/rules/unity-assets.md #场景与预制体`、`PRP/exploration-whitebox/tasks.md` T6；2026-09-26 波 3 发现。
+
+## Showcase 回放中途别人保存 .cs，Play 内域重载把测试协程吞掉，进度卡住不报失败
+- 现象：`run_tests(PlayMode, Game.Tests.Showcase)` 跑到某条用例后进度不再前进（2026-09-26 Dialogue 回放停在 2/23 达 4 分钟），`get_test_job` 一直 running；编辑器仍在 Play、帧数在涨、`timeScale = 0`、对白面板开着，控制台刷第三方 `IngameDebugConsole.DebugLogManager.LateUpdate` 空引用；既不超时也不判失败。回放框架的 `Check` / `WaitUntil` 都用 `realtimeSinceStartup` 计超时，与时停无关，别往那查。
+- 根因：并行会话保存了 `.cs`（当时是 `Core/Save/*`），编辑器偏好「Script Changes While Playing」默认是「Recompile And Continue Playing」，于是在 Play 中重编译并做域重载；UTF 的 `[UnityTest]` 协程随旧域被丢掉，没人再推进它。`Editor.log`（本工程那份，见上文「`Editor.log` 是本机全局的」）里紧跟在最后一条 `[VERIFY]` 之后能看到 `Requested script compilation because: Assetdatabase observed changes` → `initialDomainReloadingComplete`。
+- 正确做法：`ShowcaseScenario` 的 SetUp 调 `EditorApplication.LockReloadAssemblies()`、TearDown 在 `finally` 里对称 `UnlockReloadAssemblies()`（静态计数防重复解锁，退出 Play 时兜底全部释放），回放期间的改动只排队、结束后再编译。兜底：本机 Preferences → General → Script Changes While Playing 设为「Recompile After Finished Playing」；并行派单时约定回放期间不保存 `.cs`。已经卡住的：`run_tests(clear_stuck=true)` + `manage_editor(action="stop")`，再重跑。
+- 关联：`Assets/_Project/Scripts/Tests/Showcase/Framework/ShowcaseScenario.cs`（`AcquireReloadLock` / `ReleaseReloadLock`）、`.claude/skills/verify-module/SKILL.md`、`.claude/rules/module-verify.md`；2026-09-26 H1 / H6 并行时踩到。
+
+## MCP 改完场景没当场保存，别的会话一跑 PlayMode 测试改动就没了
+- 现象：用 `execute_code` / `manage_gameobject` 在 Additive 打开的 `SampleScene` 里建了一批物体，还没保存，并行会话启动了 PlayMode 测试；退出 Play 后编辑器只剩 `Boot.unity`，`SampleScene` 连同未保存改动一起消失（2026-09-26 探索白盒波 9 踩到，灰盒 `MultiLevel` 重建了一遍）。
+- 根因：UTF 跑 PlayMode 前会记下场景布局、跑完按**它开始时的磁盘版本**恢复；它开始时 `SampleScene` 的改动还没落盘，或它根本不恢复 Additive 打开的场景。多会话共用一个编辑器时，场景的「脏状态」不是你独占的。
+- 正确做法：场景改动**在同一次 MCP 调用里建完就 `EditorSceneManager.SaveScene`**，调用开头先判 `EditorApplication.isPlayingOrWillChangePlaymode`，是 Play 就退出等待，不要改；改前把场景文件复制一份到 scratchpad，保存后 `diff` 复核只增不删。
+- 关联：`.claude/skills/unity-mcp/SKILL.md` 改场景纪律、`PRP/exploration-whitebox/tasks.md` 波 9。
+
+## 等距相机下「人在桥下」不等于「桥挡住人」
+- 现象：遮挡半透明回放把玩家放在桥正中下方 (17.25, 10.25)，桥始终不淡出；以为射线或层写错了。
+- 根因：相机偏移 (0, 11.8, −14)，相机→玩家胸口的视线俯角约 40°；离地 2.6 m、南北宽 2.5 m 的桥，在视线方向上挡住的是它**北侧** 2～3 m 的人（桥投影往后落），正下方的人相机从桥南沿下面看得见。
+- 正确做法：遮挡用例先用 `Physics.RaycastAll(相机, 胸口)` 在编辑器里算一遍被挡的站位再写；挡人的位置 ≈ 遮挡物北沿 + (离地高 − 0.8) / tan(俯角)。宽大的甲板（10 m）人站在下方中部确实会被挡。
+- 关联：`Runtime/IsometricExploration/OccluderFadePresenter.cs`、`ExplorationShowcase.Occluder_FadesBridgeWhenPlayerBeneath`。

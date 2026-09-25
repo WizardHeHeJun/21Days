@@ -124,6 +124,8 @@ python .claude/skills/onboard/check_env.py
 3. 打开 `Assets/_Project/Scenes/Boot.unity`（入口场景），按 Play 应该看到标题界面，点「开始」能进示例玩法场景再退回来。跑不起来先看第 15 章。
 4. **Input System 后端不用手动切**：工程里 `ProjectSettings/ProjectSettings.asset` 的 `activeInputHandler` 已经是 `2`（Both），装完 Input System 不会弹「切换输入后端需要重启编辑器」的对话框，新旧两套输入 API 都能用（新 API 走 Action Map 给玩法用，旧 API 留给 `IngameDebugConsole` 这类第三方调试台）。
 
+**Game 视图分辨率怎么设**（验收第 3 步用得上）：Game 视图的分辨率下拉不要用 Free Aspect 做验收；固定选 **Full HD (1920x1080)** 作为 1080p / 16:9 基准，再点「+」加三个 **Fixed Resolution**（不是 Aspect Ratio）类型的自定义项做适配检查：`1280x720`（最低支持，看小屏下 UI 会不会挤）、`2560x1080`（21:9，看两侧是否自然多看、UI 不缩放）、`1920x1200`（16:10，看两侧少看时布局是否完整）。Scale 滑条只影响显示缩放，不影响内容。画面全黑多半是没进 Play，从 Boot 场景 Play、标题「开始」进场景再看。基准来自 [`roadmap.md`](roadmap.md) E8 与 [`artist-guide.md`](artist-guide.md) 7.1。
+
 ## 3. 目录与程序集：我的代码该放哪
 
 依赖方向（细则见 [`../.claude/rules/project-root.md`](../.claude/rules/project-root.md)）：
@@ -304,12 +306,14 @@ foreach (cfg.Item it in config.Tables.TbItem.DataList) { ... }
 
 ```csharp
 public sealed class Foo { public Foo(ISaveService saves) { ... } }
-SettingsSaveData s = saves.Get<SettingsSaveData>();   // 首次访问自动创建，之后恒是同一个实例
-s.MasterVolume = 0.5f;                                // 直接改，不用「标记为脏」
+PlayerProgressSaveData s = saves.Get<PlayerProgressSaveData>();   // 首次访问自动创建，之后恒是同一个实例
+s.Level = 3;                                                     // 直接改，不用「标记为脏」
 bool ok = await saves.SaveAsync(slot: 0, ct);         // 先写 .tmp 再原子替换
 bool loaded = await saves.LoadAsync(0, ct);           // 槽位不存在 / 文件损坏都返回 false，不抛
 if (saves.Exists(0)) { saves.Delete(0); }
 ```
+
+玩家设置（音量 / 显示 / 窗口）**不在存档槽里**，走 `ISettingsService`（独立档案 `settings`，见 9.1），不要 `saves.Get<SettingsSaveData>()`。
 
 JSON 文件在 `IPlatformService.SaveRoot` 下，一个槽位一个 `slot<N>.json`；每个分区各自带版本号，读回来时版本低于代码就调一次 `Migrate(旧版本)`。加分区、写迁移见第 9 章。
 **禁止**：自己拼 `Application.persistentDataPath`；在分区里放 `UnityEngine.Object` 引用（分区是纯 DTO，要存资源就存它的 Addressables key）；靠 `try/catch` 接读档异常（读档失败返回 `false`，不抛）；把大块运行期缓存塞进分区（存档要能人读能 diff）。
@@ -671,10 +675,14 @@ var rules = new SampleRules(config, telemetry.Scope("sample"));
 {
   "formatVersion": 1,
   "partitions": {
-    "Game.Core.Save.SettingsSaveData": { "version": 1, "data": { "MasterVolume": 1.0, "Language": "zh-CN" } }
+    "Game.Example.PlayerProgressSaveData": { "version": 1, "data": { "Level": 1 } }
   }
 }
 ```
+
+**设置不进存档槽**：`SettingsSaveData`（分区版本 2：音量三档、语言、分辨率宽高 0 = 原生、全屏模式 0 = 无边框全屏 / 1 = 窗口化、垂直同步、帧率上限 0 = 不限）由 `ISettingsService` 读写独立档案 `settings`，落盘为 `<SaveRoot>/profile-settings.json`，换档、删档都不影响设置。面板改 `ISettingsService.Current` 的字段，`ApplyDisplay()` / `ApplyAudio()` 生效，`SaveAsync()` 落盘，`Snapshot()` / `Restore()` 回滚。原生分辨率只从 `ISettingsService.NativeResolution` 取。
+
+**独立档案也走版本信封与 `Migrate`**：`ReadProfileAsync / WriteProfileAsync<T>` 的 `T` 实现 `ISaveData` 时，文件是 `{ "version": N, "data": {...} }`，规则与槽位分区相同（见 9.3）——没有信封的旧裸对象按版本 1 迁移，存的版本比代码新就记 Error、返回默认值、不动文件；`T` 不是 `ISaveData` 时仍是裸对象。决定（2026-09-26）：旧存档槽里的设置分区不做一次性搬运（尚无真实玩家存档）。
 
 键是分区类型的**全名**，所以给分区改命名空间或类名 = 换了一个分区，老数据会被当成「代码里已经没有的分区」跳过（只 Warn，不报错）。真要改名就把旧名当一个待迁移的老分区处理，或者别改。
 
@@ -706,7 +714,7 @@ var rules = new SampleRules(config, telemetry.Scope("sample"));
   }
   ```
   写成 `if (fromVersion < N)` 的阶梯而不是 `switch (fromVersion)`：玩家可能从很老的版本一步升上来。
-- `Migrate` 只在「存档里的版本 < 代码里的版本」时被调用**一次**。存档比代码新（玩家降级了）只 Warn 不迁，读进来的字段对不上的退回默认值。
+- `Migrate` 只在「存档里的版本 < 代码里的版本」时被调用**一次**。存档比代码新（玩家降级了）报 Error 并**拒绝读取**（该分区判为读档失败，返回 `false`/`null`），不做「凑合读进来」——高版本字段代码理解不了，硬读等于用旧代码语义误解新数据，比直接拒绝更危险。`ReadCandidateAsync`（快照候选读取）走的是同一段 `ReadPartitionsAsync`，版本过新同样拒绝。
 
 ### 9.4 规矩
 
@@ -722,12 +730,46 @@ var rules = new SampleRules(config, telemetry.Scope("sample"));
 - 它的导入器勾了 **Generate C# Class**，参数是：类名 `GameInput`、命名空间 `Game.Core.Input`、输出路径 `Assets/_Project/Scripts/Core/Input/GameInput.cs`。
 - `GameInput.cs` 是**生成物**：改了 `.inputactions` 保存，Unity 自动重新生成它。**不要手改这个文件**，改了下次保存资产就没了。
 
-### 10.2 两个 Action Map
+### 10.2 三个 Action Map
 
 | Map | 动作 | 绑定 |
 | --- | --- | --- |
-| `Gameplay` | `Move`(Vector2)、`Confirm`、`Cancel`、`Pause` | 键鼠（WASD / 方向键 / Enter / Esc / P）、手柄（左摇杆 / 十字键 / A / B / Start）、触屏（primaryTouch tap）。`Move` 上留了一条空路径的 `TouchVirtualStick` 绑定，等虚拟摇杆落地后在 Inspector 里补上 |
+| `Gameplay` | `Move`(Vector2)、`Confirm`、`Cancel`、`Pause`、`Sneak`、`Disguise`、`Tame`、`Attack`、`Run`、`Immersive`、`Interact`、`Journal` | 见下表 |
+| `Dialogue` | `Advance`、`Auto`、`Speed`、`Skip`、`History`、`Choice1`~`Choice4` | 见下表 |
 | `UI` | Input System 默认的 UI 动作（Navigate / Submit / Cancel / Point / Click / ScrollWheel / MiddleClick / RightClick / TrackedDevice*） | 默认键鼠 + 手柄 + 触屏 |
+
+`Gameplay` 键位：
+
+| 动作 | 键盘 | 手柄 |
+| --- | --- | --- |
+| `Move` | WASD / 方向键 | 左摇杆、十字键 |
+| `Confirm` | Enter、Space | `buttonSouth` |
+| `Cancel` | Esc | `buttonEast` |
+| `Pause` | P | `start` |
+| `Sneak` | 左 Shift | `leftShoulder` |
+| `Disguise` | G | `buttonNorth` |
+| `Tame` | T | — |
+| `Attack` | J | `buttonWest` |
+| `Run` | 左 Ctrl | 左摇杆按下 |
+| `Immersive` | H | 右摇杆按下 |
+| `Interact` | E、F | `buttonSouth` |
+| `Journal` | Tab | `select` |
+
+`Confirm` 是 UI 层确认，`Interact` 是场景内可交互物的触发；两者键位不同但手柄都用 `buttonSouth`（互斥场景下不冲突：Confirm 只在对话/菜单等 UI 语境响应，Interact 只在自由探索响应）。触屏目前只有 `Confirm`（`primaryTouch/tap`）一条 `.inputactions` 绑定；虚拟摇杆与走跑等按钮已在 `ExplorationHudView` 里实现并模拟同一套手柄路径，仅触屏平台显示（PC 阶段不显示，移植阶段启用）。
+
+`Dialogue` 键位（对话播放期间启用，与 `Gameplay` 互斥）：
+
+| 动作 | 键盘 | 手柄 |
+| --- | --- | --- |
+| `Advance` | Space、Enter、小键盘 Enter | `buttonSouth` |
+| `Auto` | A | `buttonNorth` |
+| `Speed` | S | `buttonWest` |
+| `Skip` | 左 Ctrl、右 Ctrl | `rightShoulder` |
+| `History` | H | `leftShoulder` |
+| `Choice1` | 1、小键盘 1 | — |
+| `Choice2` | 2、小键盘 2 | — |
+| `Choice3` | 3、小键盘 3 | — |
+| `Choice4` | 4、小键盘 4 | — |
 
 ### 10.3 玩法怎么用
 
@@ -791,7 +833,9 @@ public sealed class PlayerMovement          // 表现层 MonoBehaviour 或纯 C#
 
 ### 11.3 过渡动画
 
-`UIView` 默认用 LitMotion 做 `CanvasGroup.alpha` 的淡入淡出，时长取 `UIConfig.TransitionSeconds`（默认 0.15 秒，设 0 则跳过动画直接显隐），调度器是 `UpdateIgnoreTimeScale`——暂停菜单在 `timeScale = 0` 时也得能淡出来。要换成缩放、滑入就重写 `PlayOpenTransitionAsync(float seconds, CancellationToken ct)` / `PlayCloseTransitionAsync`。同一时刻只跑一个过渡，新的会掐断旧的（旧的 `await` 正常结束，不抛异常）。
+`UIView` 用 LitMotion 播开关过渡，时长取 `UIConfig.TransitionSeconds`（默认 0.15 秒，设 0 则跳过动画直接显隐），调度器是 `UpdateIgnoreTimeScale`——暂停菜单在 `timeScale = 0` 时也得能播出来。播哪种由 `[SerializeField] private UITransition transition` 决定（Inspector 上叫 Transition），四个预设：`Fade`（默认，CanvasGroup.alpha 淡入淡出）、`SlideUp` / `SlideDown`（alpha 淡入淡出的同时从下 / 上方滑入，偏移 40）、`Scale`（alpha 淡入淡出的同时 0.92→1 缩放）。Slide / Scale 的 alpha 与位置 / 缩放两段用 `LSequence` 拼成一条 `MotionHandle`，不是两条 motion 各自 `await`，所以打断规则和原来一样简单：同一时刻只跑一个过渡，新的会掐断旧的（旧的 `await` 正常结束，不抛异常）。四种预设之外的花样才需要重写 `PlayOpenTransitionAsync(float seconds, CancellationToken ct)` / `PlayCloseTransitionAsync`。
+
+按钮按压反馈：挂 `Core/UI/UIButtonFeedback.cs`（`[RequireComponent(typeof(RectTransform))]`），按下缩到 `pressedScale`（默认 0.94），抬起 / 移出弹回 1；同物体上的 `Selectable.interactable == false` 时按下不响应。和点击逻辑完全解耦，不接管 `Button.onClick`。
 
 ### 11.4 安全区
 
@@ -820,17 +864,25 @@ Dynamic 按需栅格化，首帧用到几个字就只烘几个。加字重或换
 （6 KB → 2 MB），在 `git status` 里冒出来。字体资产 Inspector 上点 **Clear Dynamic Data** 再提交。
 出包后运行时只在内存里加字，不写回资产。
 
+### 11.6 暂停菜单与设置面板（框架自带）
+
+两个面板都在 `Core/UI/Views/`，预制体 `Prefabs/UI/PauseMenuView.prefab`、`Prefabs/UI/SettingsView.prefab`（Addressables `UI` 组，地址 = 类名），会话逻辑在控制器里，面板本身只抛事件、不注入服务。
+
+- **暂停菜单**：`PauseMenuController`（根作用域入口点）自己接 Esc（`UICancelRouter.OnCancelWithNothingToClose`）与 P / 手柄 Start（`Gameplay/Pause`），**玩法不用写任何代码**。开着期间世界暂停（`IWorldPauseService` 令牌）、Gameplay 图关闭；「继续」/ Esc 关闭后恢复。按钮：继续、设置、回标题、退出游戏（手机上隐藏）。在标题 / 启动状态、沉浸模式、已有可关面板时不开。Esc 的完整优先级表见 `architecture.md` 5.6。
+- **设置面板**：任何地方要开设置就注入 `SettingsController` 调 `await settingsController.OpenAsync()`（标题界面将来的「设置」按钮同理）。音量滑条拖动实时生效；分辨率 / 全屏模式 / 垂直同步 / 帧率上限只记值，点「应用」才生效并存盘；「返回」或 Esc 时未应用的改动全部回滚（音量也回滚）。回滚规则在 `SettingsEditSession`，有 `SettingsEditSessionTests` 钉着。显示区在触屏为主的平台整块隐藏；语言下拉只有「简体中文」且禁用（占位）。
+- **自己的面板要让 Esc 能关**：保持 `CloseOnCancel` 为 true（Panel / Popup 默认），并照 `QuestPanelController` / `PauseMenuController` 的写法，在面板的 `OnCloseAsync` 里抛一个 `OnClosed` 事件，控制器收到后收尾（释放暂停令牌、恢复输入图）——被 Esc 从外部关掉时控制器不会走自己的 `CloseAsync`。
+
 ## 12. 音频
 
 ### 12.1 三路音量与存档的关系
 
-`MasterVolume` / `BgmVolume` / `SfxVolume` 三个属性**读写的就是 `SettingsSaveData` 分区**，不是服务自己的字段：
+`MasterVolume` / `BgmVolume` / `SfxVolume` 三个属性**读写的就是 `ISettingsService.Current`**（设置档案，不进存档槽），不是服务自己的字段：
 
 ```csharp
-audio.MasterVolume = 0.5f;     // ① 夹到 0～1 ② 写进 SettingsSaveData ③ 立刻应用到 AudioSource
+audio.MasterVolume = 0.5f;     // ① 夹到 0～1 ② 写进 ISettingsService.Current ③ 立刻应用到 AudioSource
 ```
 
-**服务不负责落盘**——设置界面拖滑块时每帧写一次文件是灾难。正确做法是设置面板关闭时调一次 `saves.SaveAsync(slot, ct)`。反过来，`LoadAsync` 读回存档后要让音量生效，重新赋一次 `audio.MasterVolume = settings.MasterVolume` 即可。
+**服务不负责落盘**——设置界面拖滑块时每帧写一次文件是灾难。正确做法是设置面板确认时调一次 `ISettingsService.SaveAsync(ct)`；放弃修改用 `Restore(snapshot)`，它会连音量一起回滚并推给音频服务。读档（`LoadAsync`）不再影响音量。
 
 音量怎么落到声音上：`AudioConfig.Mixer` 留空（现状）时用 AudioSource 音量相乘——BGM 源音量 = `Master × Bgm`，SFX 声部音量 = `Master × Sfx`，`PlaySfx` 的 `volume` 参数再乘一次。换算在纯函数 `AudioVolumeMath.Effective` 里，有测试钉着。
 

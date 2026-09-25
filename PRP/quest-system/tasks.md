@@ -44,6 +44,7 @@
 - [x] **T11**（code-reviewer PASS + Flush 重入护栏已补；三件套 / catalog / modules.json 已登记；gc_scan 唯一告警是他人的字体资产） 审查与沉淀：对 `Runtime/Quest/`、Core 两个文件、测试跑 `project-lint`；派 `code-reviewer` 审模块（无 BLOCK）；`/unity-test EditMode` 全量（用例总数比改前增加）；`/generate-doc quest` 生成三件套，`ai-docs/docs/catalog.md` 模块表补 Quest 一行，`.claude/skills/generate-doc/modules.json` 登记；`python .claude/skills/evolution/gc_scan.py` 无失效引用；新文件 `.meta` 已由 Unity 生成。（model: sonnet）
 - [x] **T13**（视觉验收后：屏内改世界空间头顶标记 `QuestTargetMarker`、屏外贴边箭头；`QuestTarget` 锚点解析；面板「< 返回」按钮；预制体 `Prefabs/World/QuestTargetMarker.prefab` 地址 `QuestTargetMarker`；回放 3/3 PASS 20260925-161334；三件套已同步）（model: opus + sonnet）
 - [x] **T12**（用户口头连续授权「提交」，未走 `/review-change`；按 commit-convention 分三次提交 22f3cc5 feat(core) / c363891 feat(quest) / 7d02757 docs(quest)，2026-09-26 核实已推送 origin/main）（主窗口）
+  - [x] 2026-09-25 用户口头授权后按 commit-convention 分三次提交：22f3cc5 feat(core)、c363891 feat(quest)、7d02757 docs(quest)；`/review-change` 未走（该命令只能用户输入）。**核实修正（2026-09-26）**：`git merge-base --is-ancestor <hash> origin/main` 对三个提交均返回已推送，与本文件顶部小结「未推送」及原始任务指令的措辞不一致——以此处 git 核实结果为准，三个提交已在 `origin/main` 上。
 
 ## 验收覆盖对照
 

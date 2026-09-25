@@ -52,6 +52,16 @@
       "src": "Assets/_Project/Scripts/Runtime/Quest",
       "docs": "ai-docs/docs/modules/quest",
       "status": "ready"
+    },
+    "narrative": {
+      "src": "Assets/_Project/Scripts/Runtime/Narrative",
+      "docs": "ai-docs/docs/modules/narrative",
+      "status": "seed"
+    },
+    "loot": {
+      "src": "Assets/_Project/Scripts/Runtime/Loot",
+      "docs": "ai-docs/docs/modules/loot",
+      "status": "ready"
     }
   }
 }

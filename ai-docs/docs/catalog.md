@@ -29,6 +29,8 @@ Claude Code 从 `CLAUDE.md`、Codex 从 `AGENTS.md` 进入，共同读取 [项�
 | Dialogue | 三件套齐备；Unity 接线已完成，视觉验收待开发者跑 /verify-module | [`modules/dialogue/`](modules/dialogue/dialogue-module-guide.md) |
 | CharacterPuppet | 三件套齐备；拼接小人待机 / 走路表现，已替换 SampleScene 玩家与巡逻者纸片 | [`modules/characterpuppet/`](modules/characterpuppet/characterpuppet-module-guide.md) |
 | Quest | 三件套齐备；Unity 接线完成，回放 3 条 PASS，视觉验收由开发者持续跟进 | [`modules/quest/`](modules/quest/quest-module-guide.md) |
+| Narrative | 纯规则层（seed），未接 Unity；三件套已生成 | [`modules/narrative/`](modules/narrative/narrative-module-guide.md) |
+| Loot | 三件套齐备；物资箱拾取 / 奖励 / 背包分区，SampleScene 已接三只箱子，回放见波 4 | [`modules/loot/`](modules/loot/loot-module-guide.md) |
 
 Sample 是端到端跑通框架每一层的样板模块（配置表 → 纯 C# 规则 → 意图 → 状态 → 面板 → 场景 → 注册 → 测试）。
 新玩法模块照它的形状写，文档照它的三件套写。**模块文档随 `/new-feature` 落地模块、`/generate-doc <模块>` 生成而产生**，产生后在本表补一行。

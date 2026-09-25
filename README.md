@@ -5,7 +5,7 @@
 Claude 从 [CLAUDE.md](CLAUDE.md)、Codex 从 [AGENTS.md](AGENTS.md) 读取 [共用项目约定](ai-docs/project-guide.md)。Codex MCP 配置在 [.codex/config.toml](.codex/config.toml)。
 下面的斜杠命令、模型派单和自动 hooks 描述属于 Claude；Codex 使用自然语言触发共用流程并主动执行检查。首次连接与验证见 [AI 接入说明](docs/ai-setup.md)。
 
-**当前状态**：框架层（`Game.Core`）已建成——启动与依赖注入、状态流、UI 分层与面板栈、音频、资源、配置表、存档、输入、定时器、对象池、日志、平台隔离，另有一个端到端的示例模块 `Sample` 供照抄。**玩法未定**，第一个真玩法模块用 `/new-feature` 起。设计定稿见 [`docs/architecture.md`](docs/architecture.md)。
+**当前状态**：框架层（`Game.Core`）已建成——启动与依赖注入、状态流、UI 分层与面板栈、音频、资源、配置表、存档、输入、定时器、对象池、日志、平台隔离，另有一个端到端的示例模块 `Sample` 供照抄。玩法层已有对话、任务、探索 HUD、物资箱等模块并接进 Boot；PC 优先，移动端移植后置；差距与路线见 `docs/roadmap.md`。设计定稿见 [`docs/architecture.md`](docs/architecture.md)。
 
 ## 你该读哪些文档
 
