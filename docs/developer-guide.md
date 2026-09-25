@@ -401,6 +401,8 @@ Animator 走 unscaled 时间，对话时停期间待机呼吸照播。验证：`
 
 ## 7. 新建玩法模块
 
+> 现有模块的清单、成熟度与接入状态见 [模块总览](modules/README.md)；给策划 / 美术看的逐模块说明也在那个目录，新模块落地后照 `player.md` 的骨架补一份。
+
 工程里有一个**端到端的样板模块 `Sample`**：`Assets/_Project/Scripts/Runtime/Sample/`，
 文档在 [`../ai-docs/docs/modules/sample/`](../ai-docs/docs/modules/sample/sample-module-guide.md)。
 它用最少的代码把框架每一层串了一遍（配置表 → 纯 C# 规则 → 意图 → 状态 → 面板 → 场景 → 注册 → 测试），
