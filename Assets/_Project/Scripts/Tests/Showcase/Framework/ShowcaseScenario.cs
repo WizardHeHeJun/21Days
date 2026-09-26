@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using Game.Core.Platform;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -34,12 +35,19 @@ namespace Game.Tests.Showcase
 
         private readonly List<UnityEngine.Object> tracked = new List<UnityEngine.Object>();
 
+        // 本条用例「预期会出现」的错误日志判定（坏档回放故意读坏文件，框架层按约定打 Error）。命中的不计入异常。
+        private readonly List<Func<string, bool>> expectedErrors = new List<Func<string, bool>>();
+        private int expectedErrorHits;
+
         private ShowcaseReport report;
         private ShowcaseOverlay overlay;
         private float testStartTime;
         private int stepIndex;
         private bool capturing;
         private bool bootLoaded;
+
+        /// <summary>本条用例专用的存档根目录覆盖（临时缓存目录下），SetUp 里建、TearDown 里删。</summary>
+        private string showcaseSaveRoot;
 #if UNITY_EDITOR
         // 回放期间锁住程序集重载（见 AcquireReloadLock）。静态计数 = 本类当前持有的锁数，防止嵌套 / 重复解锁；
         // 实例标记保证一条用例最多加一次、解一次。
@@ -83,12 +91,30 @@ namespace Game.Tests.Showcase
         [UnitySetUp]
         public IEnumerator ShowcaseSetUp()
         {
+            string testName = TestContext.CurrentContext.Test.Name;
+
+            // 必须在加载 Boot 场景之前设置：容器建出的平台服务第一次读 SaveRoot 就要拿到这个值，
+            // 否则回放会把 slot1..N.json 写进玩家真实存档目录，几条用例跑下来就把真实存档槽写满
+            // （ai-docs/pitfalls.md「从『开始』进场景的回放把玩家真实存档写满了」）。
+            // 目录按模块 + 用例名区分，同一 Play 会话里连着跑同模块的多条用例也不会互相残留。
+            showcaseSaveRoot = Path.Combine(
+                Application.temporaryCachePath, "showcase-saves", Module.ToLowerInvariant() + "-" + testName);
+            if (Directory.Exists(showcaseSaveRoot))
+            {
+                // 上一次回放没清理成功（编辑器中途崩了），先清空再用，别让残留文件影响这一次的判定。
+                Directory.Delete(showcaseSaveRoot, true);
+            }
+
+            Directory.CreateDirectory(showcaseSaveRoot);
+            PlatformServiceBase.SaveRootOverride = showcaseSaveRoot;
+
             AcquireReloadLock();
             stepIndex = 0;
             bootLoaded = false;
+            expectedErrors.Clear();
+            expectedErrorHits = 0;
             testStartTime = Time.realtimeSinceStartup;
 
-            string testName = TestContext.CurrentContext.Test.Name;
             report = ShowcaseReport.Open(Module);
             report.BeginTest(testName);
             Log($"开始回放「{testName}」，节奏 x{ShowcaseOptions.HoldScale.ToString("0.##", CultureInfo.InvariantCulture)}");
@@ -106,6 +132,12 @@ namespace Game.Tests.Showcase
             try
             {
                 EndCapture();
+                if (expectedErrors.Count > 0)
+                {
+                    Log($"预期内的错误日志 {expectedErrorHits} 条已按约定忽略");
+                    expectedErrors.Clear();
+                    LogAssert.ignoreFailingMessages = false;
+                }
 
                 int failures = report == null ? 0 : report.CurrentTestFailureCount;
                 int exceptions = report == null ? 0 : report.CurrentTestExceptionCount;
@@ -128,6 +160,21 @@ namespace Game.Tests.Showcase
             }
             finally
             {
+                // 存档根目录覆盖必须无条件清掉：留着的话下一条用例（甚至下一次 Play）会继续读到这次的临时目录。
+                PlatformServiceBase.SaveRootOverride = null;
+                if (!string.IsNullOrEmpty(showcaseSaveRoot) && Directory.Exists(showcaseSaveRoot))
+                {
+                    try
+                    {
+                        Directory.Delete(showcaseSaveRoot, true);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"{ShowcaseOptions.Prefix}[{Module}] 清理临时存档目录失败："
+                                         + $"{showcaseSaveRoot}，{e.GetType().Name}：{e.Message}");
+                    }
+                }
+
                 ReleaseReloadLock();
             }
         }
@@ -193,6 +240,23 @@ namespace Game.Tests.Showcase
             }
         }
 #endif
+
+        /// <summary>
+        /// 声明本条用例会出现、且属于被测行为本身的错误日志（例如故意读坏档时存档服务打的 Error）。
+        /// 命中 <paramref name="match"/> 的 Error 不计入报告异常；其余 Error 照常计入并在 TearDown 判失败。
+        /// 同时打开 <c>LogAssert.ignoreFailingMessages</c>，否则 UTF 会在第一条 Error 处当场打断用例（TearDown 里恢复）。
+        /// </summary>
+        protected void ExpectErrorLogs(string reason, Func<string, bool> match)
+        {
+            if (match == null)
+            {
+                return;
+            }
+
+            expectedErrors.Add(match);
+            LogAssert.ignoreFailingMessages = true;
+            Log($"本条用例预期会出现错误日志：{reason}（命中的不计入异常）");
+        }
 
         /// <summary>
         /// 走一步：记进报告、更新 Overlay、打日志、执行 act，然后停顿让开发者看清这一步的表现。
@@ -614,10 +678,37 @@ namespace Game.Tests.Showcase
                 return;
             }
 
+            if (IsExpectedError(condition))
+            {
+                expectedErrorHits++;
+                return;
+            }
+
             if (report != null)
             {
                 report.AddException(condition, stackTrace);
             }
+        }
+
+        /// <summary>日志回调里调用：不打日志（会递归进回调），判定抛异常按「不是预期错误」算。</summary>
+        private bool IsExpectedError(string condition)
+        {
+            for (int i = 0; i < expectedErrors.Count; i++)
+            {
+                try
+                {
+                    if (expectedErrors[i](condition ?? string.Empty))
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception)
+                {
+                    // 见方法注释。
+                }
+            }
+
+            return false;
         }
 
         private void DestroyTracked()

@@ -11,6 +11,7 @@ using Game.Core.Telemetry;
 using Game.Core.UI;
 using Game.Loot;
 using Game.Quest;
+using Game.Session;
 using Game.Tests.EditMode.Core;
 using MessagePipe;
 using NUnit.Framework;
@@ -48,6 +49,7 @@ namespace Game.Tests.EditMode.Loot
                 new FakePublisher<QuestObjectiveProgressedEvent>(),
                 new FakePublisher<QuestCompletedEvent>(),
                 new FakePublisher<QuestTrackingChangedEvent>(),
+                new NoopSubscriber<SessionStartedEvent>(),
                 NullTelemetryScope.Instance);
             quest.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
             Assert.That(quest.IsReady, Is.True, "真实任务表应能通过校验");
@@ -160,6 +162,21 @@ namespace Game.Tests.EditMode.Loot
             public void Publish(T message) => Received.Add(message);
         }
 
+        /// <summary>不接任何消息的假订阅者：本文件不测 <c>QuestService.ReloadFromSave</c>，只是构造要这个参数。</summary>
+        private sealed class NoopSubscriber<T> : ISubscriber<T>
+        {
+            public IDisposable Subscribe(IMessageHandler<T> handler, params MessageHandlerFilter<T>[] filters) =>
+                EmptyDisposable.Instance;
+
+            private sealed class EmptyDisposable : IDisposable
+            {
+                public static readonly EmptyDisposable Instance = new EmptyDisposable();
+                public void Dispose()
+                {
+                }
+            }
+        }
+
         /// <summary>只记录收到的通知。</summary>
         private sealed class FakeNotificationService : INotificationService
         {
@@ -196,6 +213,7 @@ namespace Game.Tests.EditMode.Loot
             public UniTask<SaveSnapshot> ReadCandidateAsync(int slot, CancellationToken ct = default) => throw new NotSupportedException();
             public SaveSnapshot Capture() => throw new NotSupportedException();
             public void Commit(SaveSnapshot snapshot) => throw new NotSupportedException();
+            public void ResetAll() => parts.Clear();
 
             public UniTask<T> ReadProfileAsync<T>(string name, CancellationToken ct = default) where T : class, new() =>
                 throw new NotSupportedException();

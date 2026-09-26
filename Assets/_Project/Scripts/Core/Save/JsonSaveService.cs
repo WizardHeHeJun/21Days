@@ -442,6 +442,16 @@ namespace Game.Core.Save
             foreach (KeyValuePair<Type, ISaveData> pair in copy) partitions.Add(pair.Key, pair.Value);
         }
 
+        /// <summary>
+        /// 清空内存分区，下次 <see cref="Get{T}"/> 建默认实例；磁盘不动。
+        /// 与 <see cref="LoadAsync"/> 一样是整体替换：旧实例从此脱钩，所以任何服务都不得缓存分区实例（见接口注释）。
+        /// 类型缓存（typeCache）保留：它只是「全名 → 类型」的反射结果，与存档内容无关。
+        /// </summary>
+        public void ResetAll()
+        {
+            partitions.Clear();
+        }
+
         /// <summary>埋点层自己的时钟。拿不到时恒为 0（ms 记成 0），不影响任何业务路径。</summary>
         private long NowMs => clock == null ? 0L : clock.MillisecondsNow;
 

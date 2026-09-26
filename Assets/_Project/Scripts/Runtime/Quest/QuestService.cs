@@ -9,6 +9,7 @@ using Game.Core.Boot;
 using Game.Core.Logging;
 using Game.Core.Save;
 using Game.Core.Telemetry;
+using Game.Session;
 using MessagePipe;
 
 namespace Game.Quest
@@ -31,6 +32,7 @@ namespace Game.Quest
         private readonly IPublisher<QuestObjectiveProgressedEvent> progressedPublisher;
         private readonly IPublisher<QuestCompletedEvent> completedPublisher;
         private readonly IPublisher<QuestTrackingChangedEvent> trackingPublisher;
+        private readonly ISubscriber<SessionStartedEvent> sessionStarted;
         private readonly ITelemetryScope telemetry;
 
         private readonly List<QuestActivatedEvent> pendingActivated = new List<QuestActivatedEvent>();
@@ -49,6 +51,7 @@ namespace Game.Quest
         private readonly List<QuestTrackingChangedEvent> batchTracking = new List<QuestTrackingChangedEvent>();
 
         private QuestRules rules;
+        private IDisposable sessionSubscription;
 
         public QuestService(
             QuestCatalog catalog,
@@ -57,6 +60,7 @@ namespace Game.Quest
             IPublisher<QuestObjectiveProgressedEvent> progressed,
             IPublisher<QuestCompletedEvent> completed,
             IPublisher<QuestTrackingChangedEvent> tracking,
+            ISubscriber<SessionStartedEvent> sessionStarted,
             ITelemetryScope telemetry)
         {
             this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
@@ -65,6 +69,7 @@ namespace Game.Quest
             progressedPublisher = progressed ?? throw new ArgumentNullException(nameof(progressed));
             completedPublisher = completed ?? throw new ArgumentNullException(nameof(completed));
             trackingPublisher = tracking ?? throw new ArgumentNullException(nameof(tracking));
+            this.sessionStarted = sessionStarted ?? throw new ArgumentNullException(nameof(sessionStarted));
             this.telemetry = telemetry ?? NullTelemetryScope.Instance;
         }
 
@@ -112,8 +117,36 @@ namespace Game.Quest
             rules.ActivateAvailable();
             Flush();
 
+            // 读档 / 新游戏后 GameSession 会发这个事件；分区实例可能已被 ISaveService.LoadAsync 整体替换，
+            // 所以重载不缓存旧分区，回调里直接调 ReloadFromSave 重新 Get。
+            DisposableBagBuilder bag = DisposableBag.CreateBuilder();
+            sessionStarted.Subscribe(_ => ReloadFromSave()).AddTo(bag);
+            sessionSubscription = bag.Build();
+
             telemetry.Track("initialized", ("quests", rules.InProgress.Count));
             return UniTask.CompletedTask;
+        }
+
+        /// <summary>
+        /// 读档 / 新游戏后重新装载任务进度：<c>rules.Restore</c> 读当前分区 → <c>ActivateAvailable</c> 补激活
+        /// → <c>Flush</c> 写回并按固定顺序发布事件，让 HUD / 面板整体刷新。由 <see cref="SessionStartedEvent"/>
+        /// 触发（<see cref="GameSession"/> 发布时分区已就位）；也可在测试里直接调用核对重载结果。
+        /// </summary>
+        public void ReloadFromSave()
+        {
+            if (!IsReady)
+            {
+                Log.Warn("QuestService 未就绪，忽略读档重载。");
+                telemetry.TrackWarn("reload_ignored", TelemetryProps.Of(("reason", "not_ready")));
+                return;
+            }
+
+            // 每次都重新 Get：LoadAsync 会整体替换分区实例，缓存旧引用会把进度写进一份没人读的对象。
+            rules.Restore(saves.Get<QuestSaveData>());
+            rules.ActivateAvailable();
+            Flush();
+
+            telemetry.Track("reloaded", ("quests", rules.InProgress.Count), ("tracked", rules.TrackedId));
         }
 
         /// <summary>上报一次目标事实，返回本次被推进的目标数；未就绪返回 0。</summary>
@@ -234,6 +267,9 @@ namespace Game.Quest
 
         public void Dispose()
         {
+            sessionSubscription?.Dispose();
+            sessionSubscription = null;
+
             if (rules == null) return;
 
             rules.OnActivated -= HandleActivated;

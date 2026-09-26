@@ -10,6 +10,7 @@ using Game.Core.Config;
 using Game.Core.Save;
 using Game.Core.Telemetry;
 using Game.Quest;
+using Game.Session;
 using Game.Tests.EditMode.Core;
 using MessagePipe;
 using NUnit.Framework;
@@ -25,6 +26,7 @@ namespace Game.Tests.EditMode.Quest
         private FakeSaveService saves;
         private FakePublisher<QuestObjectiveProgressedEvent> progressed;
         private FakePublisher<QuestTrackingChangedEvent> tracking;
+        private FakeSubscriber<SessionStartedEvent> sessionStarted;
         private QuestService service;
 
         [SetUp]
@@ -35,6 +37,7 @@ namespace Game.Tests.EditMode.Quest
             saves = new FakeSaveService();
             progressed = new FakePublisher<QuestObjectiveProgressedEvent>();
             tracking = new FakePublisher<QuestTrackingChangedEvent>();
+            sessionStarted = new FakeSubscriber<SessionStartedEvent>();
             service = new QuestService(
                 catalog,
                 saves,
@@ -42,6 +45,7 @@ namespace Game.Tests.EditMode.Quest
                 progressed,
                 new FakePublisher<QuestCompletedEvent>(),
                 tracking,
+                sessionStarted,
                 NullTelemetryScope.Instance);
             service.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
             Assert.That(service.IsReady, Is.True, "真实任务表应能通过校验");
@@ -93,11 +97,103 @@ namespace Game.Tests.EditMode.Quest
                 "进行中任务各发一条计数归零的进度事件");
         }
 
+        [Test]
+        public void ReloadFromSave_AfterPartitionSwapped_MatchesNewPartitionState()
+        {
+            service.Report(QuestObjectiveKind.TalkTo, MainQuest.ToString());
+            service.Report(QuestObjectiveKind.Counter, "crate", 2);
+            service.Track(CrateQuest);
+            Assert.That(service.TrackedId, Is.EqualTo(CrateQuest), "前置：追踪已切到支线");
+            Assert.That(service.TryGet(MainQuest, out QuestProgress mainBefore), Is.True);
+            Assert.That(mainBefore.ObjectiveIndex, Is.EqualTo(1), "前置：主线已推进到第二个目标");
+
+            // 模拟读档：ISaveService.LoadAsync 会整体替换分区字典，这里用 ResetAll 后写入一份不同的进度代替，
+            // 换入的分区里主线还在第一个目标、追踪的是主线而不是支线，跟重载前明显不同才能证明确实读了新分区。
+            saves.ResetAll();
+            QuestSaveData swapped = saves.Get<QuestSaveData>();
+            swapped.Initialized = true;
+            swapped.TrackedId = MainQuest;
+            swapped.NextAcceptOrder = 2;
+            swapped.Quests.Add(new QuestProgressData
+                { Id = MainQuest, State = (int)QuestState.InProgress, ObjectiveIndex = 0, Count = 0, AcceptOrder = 1 });
+
+            service.ReloadFromSave();
+
+            Assert.That(service.TrackedId, Is.EqualTo(MainQuest), "重载后追踪应与换入的分区一致");
+            Assert.That(service.TryGet(MainQuest, out QuestProgress main), Is.True);
+            Assert.That(main.ObjectiveIndex, Is.Zero, "重载后应读到换入分区里的目标下标，而不是重载前的进度");
+            Assert.That(service.TryGet(CrateQuest, out QuestProgress crate), Is.True);
+            Assert.That(crate.State, Is.EqualTo(QuestState.InProgress), "换入分区没有这条任务，ActivateAvailable 重新激活为默认值");
+            Assert.That(crate.Count, Is.Zero);
+
+            QuestSaveData savedBack = saves.Get<QuestSaveData>();
+            Assert.That(savedBack.TrackedId, Is.EqualTo(MainQuest), "重载后 Flush 把当前状态同步写回分区");
+        }
+
+        [Test]
+        public void SessionStartedEvent_Received_TriggersReload()
+        {
+            service.Report(QuestObjectiveKind.TalkTo, MainQuest.ToString());
+            service.Track(CrateQuest);
+            Assert.That(service.TrackedId, Is.EqualTo(CrateQuest), "前置：追踪已切到支线");
+
+            saves.ResetAll();
+            QuestSaveData swapped = saves.Get<QuestSaveData>();
+            swapped.Initialized = true;
+            swapped.TrackedId = MainQuest;
+            swapped.NextAcceptOrder = 1;
+            swapped.Quests.Add(new QuestProgressData
+                { Id = MainQuest, State = (int)QuestState.InProgress, ObjectiveIndex = 0, Count = 0, AcceptOrder = 1 });
+
+            sessionStarted.Publish(new SessionStartedEvent(1, false));
+
+            Assert.That(service.TrackedId, Is.EqualTo(MainQuest),
+                "QuestService 在 InitializeAsync 里订阅了 SessionStartedEvent，收到后应自动 ReloadFromSave");
+        }
+
         /// <summary>只记录收到的消息。</summary>
         private sealed class FakePublisher<T> : IPublisher<T>
         {
             public List<T> Received { get; } = new List<T>();
             public void Publish(T message) => Received.Add(message);
+        }
+
+        /// <summary>
+        /// 最小假订阅者：<see cref="Subscribe"/> 记住处理器，<see cref="Publish"/> 模拟消息到达时逐个调用；
+        /// 退订（Dispose 返回值）会把处理器摘掉，跟真实 MessagePipe 的订阅句柄语义一致。
+        /// </summary>
+        private sealed class FakeSubscriber<T> : ISubscriber<T>
+        {
+            private readonly List<IMessageHandler<T>> handlers = new List<IMessageHandler<T>>();
+
+            public IDisposable Subscribe(IMessageHandler<T> handler, params MessageHandlerFilter<T>[] filters)
+            {
+                handlers.Add(handler);
+                return new Subscription(this, handler);
+            }
+
+            public void Publish(T message)
+            {
+                for (int i = 0; i < handlers.Count; i++) handlers[i].Handle(message);
+            }
+
+            private sealed class Subscription : IDisposable
+            {
+                private FakeSubscriber<T> owner;
+                private readonly IMessageHandler<T> handler;
+
+                public Subscription(FakeSubscriber<T> owner, IMessageHandler<T> handler)
+                {
+                    this.owner = owner;
+                    this.handler = handler;
+                }
+
+                public void Dispose()
+                {
+                    owner?.handlers.Remove(handler);
+                    owner = null;
+                }
+            }
         }
 
         /// <summary>只递一份现成的 <c>cfg.Tables</c>。</summary>
@@ -129,6 +225,7 @@ namespace Game.Tests.EditMode.Quest
             public UniTask<SaveSnapshot> ReadCandidateAsync(int slot, CancellationToken ct = default) => throw new NotSupportedException();
             public SaveSnapshot Capture() => throw new NotSupportedException();
             public void Commit(SaveSnapshot snapshot) => throw new NotSupportedException();
+            public void ResetAll() => parts.Clear();
 
             public UniTask<T> ReadProfileAsync<T>(string name, CancellationToken ct = default) where T : class, new() =>
                 throw new NotSupportedException();

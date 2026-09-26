@@ -5,6 +5,7 @@
 //   「面板事件 → 框架事件」的转发，职责始终是「标题这个状态该做什么」，所以一直扩展原文件。
 //   标题页转正式后又接了「设置」「退出游戏」两个按钮：设置复用 SettingsController（与暂停菜单同一入口），
 //   退出复用 Boot/GameQuit；手机上隐藏退出按钮按 IPlatformService.IsTouchPrimary 判断，都属于「标题该做什么」。
+//   存档会话（PRP save-session）再加「继续」「选择存档」两个按钮，照「开始」的样子转成两个框架事件。
 
 using System;
 using System.Threading;
@@ -37,16 +38,22 @@ namespace Game.Core.Flow
     {
         private readonly IUIService ui;
         private readonly IPublisher<TitleStartClickedEvent> startClickedPublisher;
+        private readonly IPublisher<TitleContinueClickedEvent> continueClickedPublisher;
+        private readonly IPublisher<TitleLoadClickedEvent> loadClickedPublisher;
         private readonly SettingsController settings;
         private readonly IPlatformService platform;
 
         private TitleView view;
 
         public TitleState(IUIService ui, IPublisher<TitleStartClickedEvent> startClickedPublisher,
+            IPublisher<TitleContinueClickedEvent> continueClickedPublisher,
+            IPublisher<TitleLoadClickedEvent> loadClickedPublisher,
             SettingsController settings, IPlatformService platform)
         {
             this.ui = ui;
             this.startClickedPublisher = startClickedPublisher;
+            this.continueClickedPublisher = continueClickedPublisher;
+            this.loadClickedPublisher = loadClickedPublisher;
             this.settings = settings;
             this.platform = platform;
         }
@@ -62,6 +69,8 @@ namespace Game.Core.Flow
             // 但 Exit 可能被调两次（见 IGameFlow.Current 的说明），退订必须幂等——
             // C# 的 -= 对没订阅过的委托是空操作，天然幂等。
             view.OnStartClicked += HandleStartClicked;
+            view.OnContinueClicked += HandleContinueClicked;
+            view.OnLoadClicked += HandleLoadClicked;
             view.OnSettingsClicked += HandleSettingsClicked;
             view.OnQuitClicked += HandleQuitClicked;
             Log.Info("进入 TitleState：标题面板已打开");
@@ -73,6 +82,8 @@ namespace Game.Core.Flow
             if (view != null)
             {
                 view.OnStartClicked -= HandleStartClicked;
+                view.OnContinueClicked -= HandleContinueClicked;
+                view.OnLoadClicked -= HandleLoadClicked;
                 view.OnSettingsClicked -= HandleSettingsClicked;
                 view.OnQuitClicked -= HandleQuitClicked;
                 await ui.CloseAsync(view, ct);
@@ -90,6 +101,19 @@ namespace Game.Core.Flow
         {
             Log.Info("标题界面：点了开始，发布 TitleStartClickedEvent");
             startClickedPublisher.Publish(new TitleStartClickedEvent());
+        }
+
+        /// <summary>「继续」「选择存档」同「开始」：只转成框架事件，去向由玩法层（存档会话）决定，Core 不认识存档槽。</summary>
+        private void HandleContinueClicked()
+        {
+            Log.Info("标题界面：点了继续，发布 TitleContinueClickedEvent");
+            continueClickedPublisher.Publish(new TitleContinueClickedEvent());
+        }
+
+        private void HandleLoadClicked()
+        {
+            Log.Info("标题界面：点了选择存档，发布 TitleLoadClickedEvent");
+            loadClickedPublisher.Publish(new TitleLoadClickedEvent());
         }
 
         private void HandleSettingsClicked() => OpenSettingsAsync().Forget();

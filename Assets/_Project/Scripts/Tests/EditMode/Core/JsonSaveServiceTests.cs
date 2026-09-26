@@ -1,4 +1,4 @@
-// 职责：覆盖 JsonSaveService 的核心规则——往返、Exists/Delete、原子写不留残片、损坏文件不抛、版本迁移。
+// 职责：覆盖 JsonSaveService 的核心规则——往返、ResetAll、Exists/Delete、原子写不留残片、损坏文件不抛、版本迁移。
 // 为什么新建：波 2 之前没有存档相关测试；存档出错的代价是玩家进度丢失且只在真机上复现，
 // 这几条规则必须有一份不依赖场景、不依赖真实 persistentDataPath 的 EditMode 测试守着。
 
@@ -85,6 +85,27 @@ namespace Game.Tests.EditMode.Core
             Assert.That(restored.BgmVolume, Is.EqualTo(0.25f).Within(1e-4f));
             Assert.That(restored.SfxVolume, Is.EqualTo(0.75f).Within(1e-4f));
             Assert.That(restored.Language, Is.EqualTo("en-US"));
+        });
+
+        [UnityTest]
+        public IEnumerator ResetAll_AfterSave_GetReturnsFreshDefaultsAndDiskUntouched() => UniTask.ToCoroutine(async () =>
+        {
+            SettingsSaveData before = saves.Get<SettingsSaveData>();
+            before.MasterVolume = 0.3f;
+            Assert.That(await saves.SaveAsync(1), Is.True);
+            string slotPath = saves.GetSlotPath(1);
+            string fileBefore = File.ReadAllText(slotPath, Encoding.UTF8);
+
+            saves.ResetAll();
+
+            SettingsSaveData after = saves.Get<SettingsSaveData>();
+            Assert.That(after, Is.Not.SameAs(before), "ResetAll 是整体替换，之后 Get 要拿到新实例");
+            Assert.That(after.MasterVolume, Is.EqualTo(1f), "新实例是默认值");
+            Assert.That(File.ReadAllText(slotPath, Encoding.UTF8), Is.EqualTo(fileBefore), "ResetAll 不碰磁盘");
+
+            // 读回来仍是存进去的值：丢的只是内存，槽位文件完好。
+            Assert.That(await saves.LoadAsync(1), Is.True);
+            Assert.That(saves.Get<SettingsSaveData>().MasterVolume, Is.EqualTo(0.3f).Within(1e-4f));
         });
 
         [UnityTest]

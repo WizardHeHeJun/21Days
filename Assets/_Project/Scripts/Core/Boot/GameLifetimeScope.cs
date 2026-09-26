@@ -62,7 +62,10 @@ namespace Game.Core.Boot
             MessagePipeOptions options = builder.RegisterMessagePipe();
             builder.RegisterMessageBroker<BootCompletedEvent>(options);
             builder.RegisterMessageBroker<GameStateChangedEvent>(options);
+            builder.RegisterMessageBroker<GameStateChangingEvent>(options);
             builder.RegisterMessageBroker<TitleStartClickedEvent>(options);
+            builder.RegisterMessageBroker<TitleContinueClickedEvent>(options);
+            builder.RegisterMessageBroker<TitleLoadClickedEvent>(options);
             builder.RegisterMessageBroker<HudVisibilityChangedEvent>(options);
 
             // --- 服务（注册顺序 = 初始化顺序）---

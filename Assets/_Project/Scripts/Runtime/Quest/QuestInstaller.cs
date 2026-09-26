@@ -11,6 +11,7 @@ using Game.Core.Telemetry;
 using Game.Core.Timing;
 using Game.Core.UI;
 using Game.Dialogue;
+using Game.Session;
 using MessagePipe;
 using UnityEngine;
 using VContainer;
@@ -46,6 +47,9 @@ namespace Game.Quest
                     resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton);
             // 同一条注册上 AsSelf + As<IGameService>：参与启动串行，又能被按具体类型注入；
             // 另起一条同实现类型的注册会在 VContainer 注册表里撞键（见 GameLifetimeScope.RegisterSimulationDriver）。
+            // 多一个 ISubscriber<SessionStartedEvent>：读档 / 新游戏后重载进度（QuestService.ReloadFromSave）。
+            // broker 由 Session 模块的 SessionInstaller.InstallEvents 注册；VContainer 的 Register 是延迟工厂，
+            // 真正 Resolve 发生在整个容器建完之后，跟 Session/Quest 两个 GameplayInstaller 谁先谁后无关。
             builder.Register<QuestService>(resolver => new QuestService(
                     resolver.Resolve<QuestCatalog>(),
                     resolver.Resolve<ISaveService>(),
@@ -53,6 +57,7 @@ namespace Game.Quest
                     resolver.Resolve<IPublisher<QuestObjectiveProgressedEvent>>(),
                     resolver.Resolve<IPublisher<QuestCompletedEvent>>(),
                     resolver.Resolve<IPublisher<QuestTrackingChangedEvent>>(),
+                    resolver.Resolve<ISubscriber<SessionStartedEvent>>(),
                     resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton)
                 .AsSelf()
                 .As<IGameService>();

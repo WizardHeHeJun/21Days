@@ -6,6 +6,7 @@ using Game.Core.Boot;
 using Game.Core.Events;
 using Game.Core.Input;
 using Game.Core.Logging;
+using Game.Core.Save;
 using Game.Core.Telemetry;
 using Game.Core.Timing;
 using Game.Core.UI;
@@ -35,7 +36,8 @@ namespace Game.Dialogue
         public override void Install(IContainerBuilder builder)
         {
             builder.RegisterInstance(ResolveConfig());
-            // 本期已读记录只在内存里，重启清空；接存档时换成从存档读出的实例。
+            // 已读记录单例：启动时由 DialogueReadStore 从独立档案 "dialogue-read" 原地填充（同一实例，不换对象），
+            // 对白结束后由它合并写出；不进槽位存档，读旧槽位不会让已读倒退。
             builder.Register<DialogueReadData>(Lifetime.Singleton);
             builder.Register<DialogueRules>(resolver => new DialogueRules(
                     resolver.Resolve<DialogueReadData>(),
@@ -62,6 +64,14 @@ namespace Game.Dialogue
                     resolver.Resolve<IWorldPauseService>(),
                     resolver.Resolve<IInputService>(),
                     resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton);
+            // 已读档案存取：排在 DialogueService 之后。AsSelf + As<IGameService> 同一条注册：参与启动串行读档，
+            // 又能按具体类型解析（验收要从真实容器取到它）；工厂注册是因为它有一条测试用的第二构造。实现 IDisposable，容器托管释放。
+            builder.Register(resolver => new DialogueReadStore(
+                    resolver.Resolve<DialogueReadData>(),
+                    resolver.Resolve<ISaveService>(),
+                    resolver.Resolve<DialogueService>()), Lifetime.Singleton)
+                .AsSelf()
+                .As<IGameService>();
             // AsSelf：焦点系统要按具体类型注入 Binder（RegisterEntryPoint 默认只注册接口）。
             builder.RegisterEntryPoint<DialogueSceneBinder>(Lifetime.Singleton).AsSelf();
             builder.RegisterEntryPoint(resolver => new DialogueInteractionFocus(
