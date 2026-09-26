@@ -74,6 +74,8 @@
 | 音乐、音效 | `Assets/_Project/Audio/` | 无自动规则，导入设置要手调，见第 8 章 |
 | UI 面板预制体 | `Assets/_Project/Prefabs/UI/` | 会被「资产体检」检查有没有进 Addressables，见第 9 章 |
 | 字体（`.ttf` / `.otf` 与 TMP 字体资产） | `Assets/_Project/Art/Fonts/` | 无自动规则，只是约定的位置 |
+| Live2D 模型（演出用的角色） | `Assets/_Project/Art/Live2D/<角色>/` | 无自动规则；待 SDK 导入后才能用，见 [`developer-guide.md` 6.16 节](developer-guide.md) |
+| 演出预制体与时间轴 | `Assets/_Project/Prefabs/Performance/` + `Assets/_Project/Data/Performance/Timelines/` | 由「演出编辑器」（菜单 `21Days/演出/演出编辑器`）一步生成，**美术 / 动画师不用手建**，见第 6.11 节 |
 
 **关于字体**：**中文已经能正常显示了，你不用做任何事**。工程里放了 `Font_NotoSansSC_Regular.otf`
 （Noto Sans SC Regular，8.0 MB，SIL OFL 1.1，可商用可再分发，许可证在同目录 `OFL.txt`，别删），
@@ -419,6 +421,21 @@ Addressables 地址仍是 `TitleView`）是**当前工程唯一的正式场景�
 
 **还没做的**：「继续 / 选择存档」按钮——要等存档系统的当前槽、自动保存、槽位元数据落地后才能加，
 到时候会在 `Buttons` 这个布局组里追加两个按钮，美术不用重做现有三张图。
+
+### 6.11 演出面板
+
+剧情节点插一段短演出（黑边、字幕、角色出场）用的面板是 `Assets/_Project/Prefabs/UI/PerformanceView.prefab`，
+细节见[策划手册说明 performance.md](modules/performance.md)。可换图的元素跟对话框一样，只换 `Image` / `SpriteRenderer`
+上的 Sprite（和颜色、字体大小），不改层级、不改物体名：
+
+| 元素 | 是什么 |
+| --- | --- |
+| 上下黑边 | 两条 `Image`，全宽、纯黑或按需要换成有纹理的边框图 |
+| 字幕底板 | 字幕文字后面的半透明底条 |
+| 跳过进度环 | 长按跳过时显示进度的图，现用 `Fx_SelectRing`（和 Monster 模块的选中圈同一张占位图，正式美术再各自换） |
+
+演出预制体与时间轴本身**不需要美术手建**，动画师用「演出编辑器」（菜单 `21Days/演出/演出编辑器`）新建，
+生成在 `Prefabs/Performance/` 与 `Data/Performance/Timelines/`（见第 3 章的资源放哪一表）。
 
 ## 7. 分辨率与安全区
 

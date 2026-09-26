@@ -43,6 +43,7 @@ maturity: stable
 | `DialogueContent` | 与表无关的内容模型（节点、选项、立绘指令），构造时校验跳转 / 槽位 / 出口 | Catalog 产出，测试可直接 new |
 | `DialogueCharacter` | 角色 → 表情 → Addressables 地址的只读索引 | Catalog 产出 |
 | `DialogueController` | 表现驱动：每帧打字、立绘与选项图标的加载与释放、选项刷新、历史面板、跳过确认、把 View 事件翻成意图 | 根作用域单例；只被 Service 调 |
+| （插播）`IPerformanceService`（`Game.Performance`，可空） | 节点带 `PerformanceId` 时，Controller 摆台词前先 `await PlayAsync`；`Performing` 期间语义同覆盖中（`DialogueController.cs:151`、`325`） | `DialogueInstaller` 用 `resolver.TryResolve` 注入，Boot 没挂 `PerformanceInstaller` 时为 null |
 | `DialogueView` | `UIView`（Popup 层）：显示文字 / 立绘 / 选项（含图标位）/ 控件，只抛事件，不注入服务 | `IUIService` 按地址实例化 |
 | `DialogueSkipConfirmView` | `UIView`（Popup 层）：「是否跳过剧情？」确认 / 取消，只抛 `OnConfirm / OnCancel` | Controller 在点跳过时开关 |
 | `DialogueHistoryView` | `UIView`：历史记录只读展示 | Controller 按需开关 |
@@ -86,6 +87,7 @@ DialogueService.PlayAsync
   ├─ IInputService.DisableMap(Gameplay) + EnableMap(Dialogue)  （UI 图不动，EventSystem 靠它）
   ├─ OnStarted → DialogueController.PresentAsync(conditions, "dialogue:<id>", policy, ct)
   │       每帧：Skipping? → rules.Skip ； Visit 变 → PrepareAsync（SetLine + 立绘）→ rules.Ready
+  │       Visit 变 → 节点有 PerformanceId（且非跳过中、Preparing）→ Performing=true → await IPerformanceService.PlayAsync → 复位 → 比对 generation / visit → PrepareAsync
   │             Typing → rules.RevealTo(cps × unscaledΔ) ； policy.TickAuto → Submit(Advance)
   │       View.OnTap → policy.RegisterTap → Submit(Advance) ； View.OnIntent → Submit(Choose)
   │       DialogueKeyboardInput.Tick → HandleKey → Map → 同一套处理函数（Tap / 按钮 / Submit(Choose)）
@@ -119,6 +121,7 @@ DialogueService.PlayAsync
 | `Game.Core.Config`（`IConfigService`）+ 生成物 `cfg.dialogue.*` | 内容表 |
 | `Game.Core.Save`（`ISaveData`） | `DialogueSaveData` 的形状 |
 | `Game.Narrative`（**只用** `EncounterContext` / `NarrativeCondition`） | 选项条件的值类型与匹配 |
+| `Game.Performance`（**只用** `IPerformanceService`，可为 null） | 对白节点前插播演出；Performance 不反向引用 Dialogue |
 
 Core 不认识本模块；`IWorldPauseService` 里没有对话名词。Narrative 不反向引用 Dialogue。
 `CameraBillboard`（IsometricExploration）只在场景里挂到标记 / 气泡子物体上，本模块代码不引用它。
@@ -281,6 +284,7 @@ Controller、View、Rules、Focus、键位入口、气泡一律不碰 `Time.time
 | 翻译规则 | `side` → 该槽 `Show`；`clearOther` → 另一槽 `Clear`（旁白忽略）；`expression` 空取默认；`speakerName` 空取角色显示名；`revision < 1` 按 1；条件 `anyOf[].all[]` = 外层 OR 内层 AND（`DialogueCatalog.cs:170`、`200`） |
 | 条件事实 | `ConditionFact` 与 `EncounterContext.Fact` **按名字**映射，改名 / 增项两边一起改（`DialogueCatalog.cs:242`） |
 | 选项图标 | `Choice.icon`（Addressables 地址，空串 = 无图标，**JSON 必须显式写 `"icon": ""`**）→ `DialogueContent.Choice.IconKey`（`DialogueCatalog.cs:226`） |
+| 插播演出 | `Node.performance`（演出 id = Addressables 地址，空串 = 不插播，**JSON 必须显式写 `"performance": ""`**）→ `DialogueContent.Node.PerformanceId`（去首尾空白，`DialogueCatalog.cs:164`）；验证树 `1003.json` 第 2 句带 `perf_sample_greeting` |
 
 内容非法（跳转不存在、选项 `next` 与 `outcome` 不是恰好一个、表情不存在、选择节点无选项）在首次访问 Catalog 时抛
 `ArgumentException`，消息带对话 id；不会半途落缓存。
@@ -292,6 +296,7 @@ Controller、View、Rules、Focus、键位入口、气泡一律不碰 `Time.time
 | `play_requested` / `play_rejected`（busy / unknown_id / invalid_config）/ `play_failed` / `ended` | `DialogueService` |
 | `started` / `node_entered` / `choice_selected` / `choice_rejected` / `skipped` / `restored` / `cancelled` | `DialogueRules` |
 | `portrait_missing` / `expression_fallback` / `portrait_load_failed` / `portrait_fallback_failed` / `choice_icon_failed`（Warn，带 `key`） | `DialogueController` |
+| `performance_unavailable`（Warn，`node`、`performance`；演出服务未注册）/ `performance_failed`（Error，`node`、`performance`、异常；演出抛非取消异常，对白照常继续） | `DialogueController` |
 | `focus_changed`（`target` 物体名、`id` 对话树；只在变化时埋） | `DialogueInteractionFocus` |
 
 契约见 [`docs/telemetry.md`](../../../../docs/telemetry.md)。

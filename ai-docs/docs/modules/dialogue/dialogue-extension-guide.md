@@ -15,6 +15,7 @@ maturity: stable
 | 要加什么 | 扩展点 | 改代码吗 |
 | --- | --- | --- |
 | 一棵新对话树 | `Tables/Data/dialogue/<id>.json` | 否 |
+| 某句台词前插播演出 | 节点 `performance` 字段（见「给一句台词插播演出」） | 否 |
 | 新角色 / 新表情 | `Tables/Data/dialogue_character.json` + Addressables + 立绘 PNG | 否 |
 | 真实条件来源 | 实现 `IDialogueConditionSource`，在 `DialogueInstaller` 替换注册 | 是 |
 | 新的触发方式 | 调 `DialogueService.PlayAsync` 或 `DialogueInteractable.Interact` | 调用方侧 |
@@ -31,6 +32,14 @@ maturity: stable
 4. 场景里按下文「加一个带树 NPC」摆物体；在 `DialogueCatalogTests.cs` 补结构断言，跑 `/unity-test EditMode Dialogue`。
 
 改已上线台词的文字时把该节点 `revision` +1：存档恢复会拒绝版本不符的快照，已读键也按版本区分。
+
+## 给一句台词插播演出
+
+1. 在该节点的 JSON 里把 `"performance": ""` 改成演出 id，如 `"performance": "perf_sample_greeting"`；只改这一个字段，跑 `scripts/gen-tables.ps1`。
+2. 演出 id 就是演出预制体（舞台 + 时间轴）在 Addressables 的地址，由动画师在演出编辑器里建好并登记（见 `PRP/performance-pipeline/prp.md` 2.2 / 2.8）；地址不存在时演出服务报错，对白埋 `performance_failed` 后照常显示这一句。
+3. 语义：进入该节点、摆台词**之前**先播完演出；玩家确认跳过对白后的快进句不插播；`End` 节点上的演出不会播（进入即结束）。
+   Boot 没挂 `PerformanceInstaller` 时埋 `performance_unavailable` 并直接显示台词。
+4. 时停与输入图不用管：对白与演出两边服务各自持令牌、只恢复进来前的状态。参照 `Tables/Data/dialogue/1003.json`。
 
 ## 加一个带树 NPC 并配头顶标记
 

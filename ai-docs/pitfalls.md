@@ -240,6 +240,24 @@
 - 正确做法：遮挡用例先用 `Physics.RaycastAll(相机, 胸口)` 在编辑器里算一遍被挡的站位再写；挡人的位置 ≈ 遮挡物北沿 + (离地高 − 0.8) / tan(俯角)。宽大的甲板（10 m）人站在下方中部确实会被挡。
 - 关联：`Runtime/IsometricExploration/OccluderFadePresenter.cs`、`ExplorationShowcase.Occluder_FadesBridgeWhenPlayerBeneath`。
 
+## 可选第三方 SDK 的适配层：asmdef 引用不存在的程序集不会报错，但程序集名猜错会静默失效
+- 现象：给 Live2D 做适配层时担心「SDK 缺席、asmdef 引用了不存在的 `Live2D.Cubism.*` 会编译报错」，准备绕远路（`~` 目录 + 复制安装）。实测（2026-09-26）：asmdef 的 `defineConstraints` 未满足时 Unity **跳过整个程序集**，连引用解析都不做，控制台零错误零警告，`CompilationPipeline.GetAssemblies()` 里也没有它。反过来真正的坑是：PRP 里按印象写的引用名 `Live2D.Cubism.Core` / `Live2D.Cubism.Framework` 都不存在——官方 CubismUnityComponents 运行时只有一个 `Live2D.Cubism.asmdef`（另有 `Live2D.Cubism.Editor`）。名字错了不会报错，导入 SDK 后适配层照样不编译、符号也不会被检测脚本加上，表现成「装了 SDK 什么都没发生」。
+- 根因：约束未满足的程序集对编译管线是不可见的，错误只会在符号真的被定义之后才暴露；而符号又靠检测那个（写错的）asmdef 名来加，两头互相掩护。
+- 正确做法：可选 SDK 一律「独立 asmdef + `defineConstraints` + 编辑器脚本按 SDK 的 asmdef **文件名**检测后写符号」；引用名与检测名必须去官方仓库的文件树核对（不要凭记忆写），并在适配层文件头列出用到的 API 与「未本地编译验证」字样；导入 SDK 后第一件事是编译一次适配层。
+- 关联：`Assets/_Project/Scripts/Runtime/Live2D/Game.Live2D.asmdef`、`Scripts/Editor/Performance/Live2DDefineSync.cs`（菜单 `21Days/演出/检查 Live2D 符号` 是状态锚点）、`PRP/performance-pipeline/prp.md` 2.7。
+
+## 编辑器代码用 Timeline API 建好的时间轴，会被别的测试运行器收尾时回滚 Undo 打成空壳
+- 现象：`PerformanceTemplateFactory` 刚建好 8 秒 / 5 轨的 `.playable`，回放一进 Play 就秒结束；磁盘上的资产变成 `m_Tracks: []`、`m_FixedDuration: 0`（`CreateAsset` 时的初始状态），只多一个没人引用的 Markers 子资产（2026-09-26 演出回放第 1 轮）。
+- 根因（推断，未复现）：`TimelineAsset.CreateTrack` / `CreateClip` / `CreateMarkerTrack` 在编辑器下会往 Undo 栈推快照；随后并行会话的 EditMode 运行器或别的工具回滚了当前 Undo 组，资产被打回初始状态并在下一次保存时写盘。
+- 正确做法：编辑器工具用代码建完时间轴 / 预制体后，对资产本体与每条轨道 `Undo.ClearUndo(obj)` 再 `SaveAssetIfDirty`；建完就保存，别让「刚建好、还没落盘」的状态跨越任何测试运行。另外 Animation 轨默认 `ApplyTransformOffsets`，片段按**首帧相对**叠加到轨道偏移上：代码建的入场动画要把轨道 `m_Position` 设成片段首帧值，否则演员会整体漂移（同一轮踩到）。
+- 关联：`Assets/_Project/Scripts/Editor/Performance/PerformanceTemplateFactory.cs`、`PRP/performance-pipeline/tasks.md` T26。
+
+## 并行会话整目录恢复 `ProjectSettings/`，会把别人刚加的图层 / 符号一起抹掉
+- 现象：本会话用 MCP `add_layer Performance` 加进 `TagManager.asset` 后，同一小时内该文件两次被改写回没有这个图层的版本（一次只是编辑器内存丢了、一次文件也回去了），场景与预制体里的第 9 层引用随之悬空（2026-09-26）。
+- 根因：`/verify-module` 的副作用清单建议恢复 `EditorSettings.asset`，有会话顺手用 git 把 `ProjectSettings/` **整个目录**恢复到 HEAD；`TagManager.asset` / `ProjectSettings.asset`（脚本符号）都在里面。
+- 正确做法：恢复 ProjectSettings 只恢复**点名的那一个文件**；加了图层 / 标签 / 编译符号的会话立刻给并行会话发一条；回放或提交前 `git diff ProjectSettings/TagManager.asset` 复核图层还在。
+- 关联：`ai-docs/pitfalls.md #两个会话共用一个工作区`、`.claude/skills/verify-module/SKILL.md` 第 7 步。
+
 ## 多会话共用一个工作区：别人 `git add` 过的文件会随你的 `git commit` 一起进库
 - 现象：任务编辑器那轮首笔提交混进六个别人暂存的文件（并非本轮改动）。
 - 根因：`git commit` 提交的是整个索引，索引是共享的，不会自动区分「谁 `add` 的」。
