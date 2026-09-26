@@ -136,6 +136,15 @@ namespace Game.Core.Input
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""Inventory"",
+                    ""type"": ""Button"",
+                    ""id"": ""5ae5d94a-4408-4aec-ae0e-57c20000741f"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -532,6 +541,28 @@ namespace Game.Core.Input
                     ""processors"": """",
                     ""groups"": """",
                     ""action"": ""Journal"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""95653e5a-bc5e-40f8-9788-441f329f2afb"",
+                    ""path"": ""<Keyboard>/b"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Inventory"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""7cccb1ac-9c1e-4621-ac7a-62f6dae96a73"",
+                    ""path"": ""<Gamepad>/rightShoulder"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Inventory"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
                 }
@@ -1258,6 +1289,7 @@ namespace Game.Core.Input
             m_Gameplay_Immersive = m_Gameplay.FindAction("Immersive", throwIfNotFound: true);
             m_Gameplay_Interact = m_Gameplay.FindAction("Interact", throwIfNotFound: true);
             m_Gameplay_Journal = m_Gameplay.FindAction("Journal", throwIfNotFound: true);
+            m_Gameplay_Inventory = m_Gameplay.FindAction("Inventory", throwIfNotFound: true);
             // UI
             m_UI = asset.FindActionMap("UI", throwIfNotFound: true);
             m_UI_Navigate = m_UI.FindAction("Navigate", throwIfNotFound: true);
@@ -1361,6 +1393,7 @@ namespace Game.Core.Input
         private readonly InputAction m_Gameplay_Immersive;
         private readonly InputAction m_Gameplay_Interact;
         private readonly InputAction m_Gameplay_Journal;
+        private readonly InputAction m_Gameplay_Inventory;
         public struct GameplayActions
         {
             private @GameInput m_Wrapper;
@@ -1377,6 +1410,7 @@ namespace Game.Core.Input
             public InputAction @Immersive => m_Wrapper.m_Gameplay_Immersive;
             public InputAction @Interact => m_Wrapper.m_Gameplay_Interact;
             public InputAction @Journal => m_Wrapper.m_Gameplay_Journal;
+            public InputAction @Inventory => m_Wrapper.m_Gameplay_Inventory;
             public InputActionMap Get() { return m_Wrapper.m_Gameplay; }
             public void Enable() { Get().Enable(); }
             public void Disable() { Get().Disable(); }
@@ -1422,6 +1456,9 @@ namespace Game.Core.Input
                 @Journal.started += instance.OnJournal;
                 @Journal.performed += instance.OnJournal;
                 @Journal.canceled += instance.OnJournal;
+                @Inventory.started += instance.OnInventory;
+                @Inventory.performed += instance.OnInventory;
+                @Inventory.canceled += instance.OnInventory;
             }
 
             private void UnregisterCallbacks(IGameplayActions instance)
@@ -1462,6 +1499,9 @@ namespace Game.Core.Input
                 @Journal.started -= instance.OnJournal;
                 @Journal.performed -= instance.OnJournal;
                 @Journal.canceled -= instance.OnJournal;
+                @Inventory.started -= instance.OnInventory;
+                @Inventory.performed -= instance.OnInventory;
+                @Inventory.canceled -= instance.OnInventory;
             }
 
             public void RemoveCallbacks(IGameplayActions instance)
@@ -1721,6 +1761,7 @@ namespace Game.Core.Input
             void OnImmersive(InputAction.CallbackContext context);
             void OnInteract(InputAction.CallbackContext context);
             void OnJournal(InputAction.CallbackContext context);
+            void OnInventory(InputAction.CallbackContext context);
         }
         public interface IUIActions
         {
