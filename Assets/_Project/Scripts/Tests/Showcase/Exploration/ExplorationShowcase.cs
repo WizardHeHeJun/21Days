@@ -44,6 +44,15 @@ namespace Game.Tests.Showcase.Exploration
         private const string PromptText = "E 打开物资箱";
         private const string RewardTitle = "获得物资";
 
+        /// <summary>
+        /// 「获得物资」通知前面最多可能排队的条数，用来估算等待上限（2026-09-26 查实：不是数据问题，
+        /// 是 <see cref="INotificationService"/> 单队列时序——进场景的任务接取通知、开箱前后各一次自动保存
+        /// 「已保存」通知都可能排在「获得物资」前面，同标题才合并，不同标题只会排队，见
+        /// <c>QuestNotificationPresenter</c> / <c>SaveTriggerBridge</c> / <c>NotificationQueue</c>）。
+        /// 队列深度不对外暴露，只能按已知触发点估个上界，宁可等久一点也不要在通知还没轮到时就判失败。
+        /// </summary>
+        private const int MaxNotificationsAheadOfReward = 3;
+
         /// <summary>摇杆推动的时长（真实时间）。步行 3 m/s、奔跑 5 m/s，0.6 秒足够拉开差距。</summary>
         private const float StickSeconds = 0.6f;
 
@@ -216,13 +225,27 @@ namespace Game.Tests.Showcase.Exploration
             bool first = false;
             int itemsBefore = ItemTotal();
             yield return Step("确认开箱", () => first = loot.TryCollect(focus.Current), 0f);
-            yield return Check("开箱成功：箱子变开、头顶标记消失、提示消失",
+            yield return Check("开箱成功：箱子变开、头顶标记消失、提示消失（这几项在 TryCollect 返回时已同步生效，不经过通知队列）",
                 () => first && crateA.IsOpened && !CrateMarkerActive(crateA) && !HudActive("InteractPrompt"), 3f);
             // 期望正文数据驱动：物品名查 tbitem、拼法走 LootService.ComposeBody（同开箱路径），场景改 itemId / 表改名都不用改这里。
             string crateABody = ExpectedRewardBody(crateA);
-            yield return Check($"顶部通知「{RewardTitle}」，正文为「{crateABody}」（Crate_A = tbitem {crateA.ItemId} ×{crateA.Count}）",
-                () => NotificationShows(RewardTitle, crateABody), 3f);
-            yield return Check("支线 2002 计数 +1（1/3），背包多了物品",
+            // 通知走 INotificationService 的共用单队列（NotificationQueue，仅同标题合并）：进场景时的任务
+            // 接取通知、开箱前后的自动保存「已保存」通知都可能排在「获得物资」前面，它不一定立刻显示。
+            // 用一个每帧采样的等待：只要曾经见过目标标题 + 正文就记住（NotificationView 换卡片很快，
+            // 逐帧轮询防止卡在两次轮询之间错过），超时按「最多可能排队的条数 + 1」估算，时长从
+            // UIConfig 读，不写死。
+            bool rewardSeen = false;
+            float rewardTimeout = NotificationTimeoutSeconds(MaxNotificationsAheadOfReward);
+            yield return Check(
+                $"顶部通知「{RewardTitle}」在最多 {rewardTimeout:0.#} 秒内曾经显示过、正文为「{crateABody}」"
+                + $"（Crate_A = tbitem {crateA.ItemId} ×{crateA.Count}；通知共用队列，可能被场景通知 / 自动保存通知排在前面，不代表立即出现）",
+                () =>
+                {
+                    if (NotificationShows(RewardTitle, crateABody)) rewardSeen = true;
+                    return rewardSeen;
+                },
+                rewardTimeout);
+            yield return Check("支线 2002 计数 +1（1/3），背包多了物品（这两项同样在开箱那一刻就同步生效，不依赖上面的通知是否已经轮到）",
                 () => CrateQuestCount() == 1 && ItemTotal() > itemsBefore, 3f);
             yield return Snapshot("开箱·获得物资");
 
@@ -626,6 +649,19 @@ namespace Game.Tests.Showcase.Exploration
                 name = "#" + crate.ItemId;
             }
             return LootService.ComposeBody(lootConfig == null ? null : lootConfig.RewardBodyFormat, name, crate.Count);
+        }
+
+        /// <summary>
+        /// 估算「等一条通知最多该花多久」：(可能排在前面的条数 + 自己这一条) × 单条停留秒数 + 2 秒缓冲。
+        /// 秒数从 <see cref="UIConfig"/> 读（容器里拿不到时退回 NotificationService 的默认值 2.5，不写死）；
+        /// 「已保存」等通知实际停留比这个短（<c>SessionConfig.SaveNoticeSeconds</c>），按 UIConfig 的值算
+        /// 是往宽了估，不会因为估少了而误判。
+        /// </summary>
+        private float NotificationTimeoutSeconds(int maxAhead)
+        {
+            UIConfig config = ResolveService<UIConfig>();
+            float seconds = config == null ? 2.5f : config.NotificationSeconds;
+            return (maxAhead + 1) * seconds + 2f;
         }
 
         private bool NotificationShows(string title, string body)
