@@ -351,3 +351,9 @@
   起的**、且**已经超过 5 分钟没有任何进展**的任务；共用编辑器时优先用 `get_test_job(wait_timeout=60)` 之类的轮询等待，
   不要一遇到「暂时没结果」就 `clear_stuck`。
 - 关联：`.claude/skills/unity-mcp/SKILL.md`、`ai-docs/pitfalls.md #Showcase 回放中途别人保存 .cs`；`PRP/save-session/tasks.md`。
+
+## URP 相机栈只接受渲染器类型一致的相机：舞台 Overlay 相机在 3D 场景里整段不画
+- 现象：演出舞台相机（Overlay）叠进主相机的 `cameraStack` 后，2D 验证场景正常，SampleScene（3D）里黑边、字幕都在、舞台内容一片空白；服务没走退路、没埋点，只有游戏内调试面板的 Warning 计数每帧涨 1（2026-09-26 冒烟发现）。
+- 根因：URP 资产里有多个渲染器（0 号 Renderer2D、1 号 UniversalRenderer），舞台相机 `rendererIndex = -1` 落到默认的 0 号，主相机用 1 号；`UniversalRenderPipeline` 对渲染器类型不同的叠加相机直接跳过并每帧告警 `Only cameras with compatible renderer types can be stacked`，MCP 的 `read_console` 读不到这条原文。
+- 正确做法：叠加前把 Overlay 相机的渲染器对齐到主相机（URP 14 没有公开的索引 getter，反射读 `UniversalAdditionalCameraData.m_RendererIndex` 再 `SetRenderer`，收尾还原），叠加后再比一次 `scriptableRenderer.GetType()`，不一致就走 Base 退路并埋点；验证场景与正式场景用的渲染器不同时，两边都要冒烟一次。
+- 关联：`Assets/_Project/Scripts/Runtime/Performance/PerformanceService.cs`（`AttachCamera` / `ReadRendererIndex`）、`PRP/performance-pipeline/tasks.md` T31b。

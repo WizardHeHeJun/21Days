@@ -57,3 +57,11 @@
 - [x] T28 `docs/modules/performance.md` 策划 / 美术说明 + `docs/modules/README.md` 加行；`docs/developer-guide.md` 加「Live2D 接入与演出制作」一节；`docs/artist-guide.md` 提一句演出目录；`docs/roadmap.md` D3 行与 W3 进度回填（sonnet）。已完成：`docs/modules/performance.md` 八节（含「给动画师」）、README 加行、developer-guide 6.16、artist-guide 第 3 章两行 + 6.11、roadmap D3 / W3。
 - [x] T29 code-reviewer（sonnet）：**PASS**，无 BLOCK / WARN；一条 INFO——`Game.Tests.EditMode` 引用 `Game.Editor`（任务编辑器会话所加，本模块的编辑器测试也用到），`project-root.md` 依赖图未画这条边，下次改规则时补。
 - [x] T30 主窗口复核（2026-09-26）：控制台无 `error CS`；EditMode 全量 645/645；`invariants.py` / `gc_scan` 仅 ToastView 未登记与字体 Dynamic Data 两条他人遗留；埋点门：`scan.py Performance` 的 10 条候选全是参数校验 throw / 普通 `return false` / 已走 Log 桥的分支，无该埋未埋；沉淀门：pitfalls 追加 3 条；模板工厂已补 `Undo.ClearUndo`。清单已列，停下等授权。
+
+## 波 5 后续（2026-09-26 用户追加，提交 c40b51c 之后）
+
+- [x] T31 SampleScene 挂示例演出：`player` 根加 `PerformanceTriggerActor`、`Trigger_VillageEntrance` 放村民东南 (9.5, 4.888, 2.5)（避开出生点→长者 / 物资箱路径与各 Showcase 传送点）、主相机剔除遮罩 -1 → -513；冒烟起播 / 停顿 / 跳过埋点齐全。**发现 bug**：主相机用 1 号 UniversalRenderer、舞台相机默认 0 号 Renderer2D，URP 拒绝叠加（每帧告警、舞台不画），服务未走退路 → T31b 修。
+- [x] T32 示例演出立绘上移 0.5 单位（y 曲线 -1.5→-1.0，轨道偏移同步），t=6 s 采样 y=-0.983；校验零问题。
+- [x] T31b `PerformanceService.AttachCamera` 运行时把舞台相机渲染器对齐主相机（反射读 `m_RendererIndex` + 类型比较退路 `renderer_mismatch`）；`HoldMarker` 3.1 s → 2.9 s（落在字幕 1 内）；SampleScene 冒烟复验立绘可见（model: opus）。已完成：反射读 `m_RendererIndex` 对齐、`renderer_mismatch` 退路；标记 2.9 s；冒烟截图里舞台在 3D 灰盒上完整可见、无渲染器告警（主 / 舞台相机均 UniversalRenderer idx 1）。
+- [x] T33 Dialogue D1 / D2：立绘入场 / 退场滑动、表情交叉淡化、说话者压暗；对话框 `SlideUp` 开合、名牌 punch、标点停顿可配（`DialogueTypingCadence` 纯 C# + 测试）；Showcase 加一条；三件套 / 策划说明 / roadmap 同步（model: opus）。已完成：`DialogueTypingCadence` / `DialogueMotionSettings` / `DialoguePortraitSlot` 新建，`DialogueView` 预制体 Transition=SlideUp，EditMode Dialogue 98/98（agent 自报），回放 7/7 PASS（`Logs/verify/dialogue/20260926-141646/`，主窗口看过 12 / 13 两张）。出入：控制器改为先加载完新立绘再逐槽切换、旧句柄延迟释放；恢复路径判定用 Typing / AwaitAdvance；旁白两侧都压暗。
+- [x] T34 主窗口复核（2026-09-26 14:48）：控制台无 `error CS`；EditMode 全量 718/718；回放 Performance 4/4、Dialogue 7/7、Session 2/2（并行会话的用例，确认打字节奏与触发区没把它弄挂）；`ProjectSettings/` 无副作用。清单已列，等授权。

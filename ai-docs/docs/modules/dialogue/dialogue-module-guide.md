@@ -39,6 +39,9 @@ maturity: stable
 | `DialogueRules` | **纯 C#** 推进规则：阶段机（`Preparing → Typing → AwaitAdvance / AwaitChoice → Completed`，另有 `Closed`）、选项条件复验、历史、已读键、`Skip` 同步快进、`Capture / Restore` | 根作用域单例；Service 调 `Start / Cancel`，Controller 调其余 |
 | `DialoguePlaybackSettings` | 表现参数的**校验后快照**（`readonly struct`），非法值构造时抛 `ArgumentException` | `DialogueConfig.ToPlaybackSettings()` 产出 |
 | `DialoguePlaybackPolicy` | **纯 C#** 表现策略：点击何时算补全 / 推进、倍速档、自动计时、跳过标记；时间由调用方传入 | Service 惰性建一个，每段对白 `ResetForDialogue`（`DialogueService.cs:138`） |
+| `DialogueMotionSettings` | 面板动效参数的校验后快照（`readonly struct`，不引 UnityEngine，压暗色拆成三个 float），挂在 `DialoguePlaybackSettings.Motion` 上 | Controller 打开面板后 `view.SetMotion(policy.Settings.Motion)` |
+| `DialogueTypingCadence` | **纯 C#** 打字节奏：本帧字符预算 → 新显示字数，标点后先耗停顿预算 | Controller 每段对白按 `policy.Settings` 建一个，每句 `Reset`、每帧 `Advance` |
+| `DialoguePortraitSlot` | View 私用的普通类（`internal`，非组件）：一个立绘槽的入场 / 退场 / 交叉淡化 / 压暗状态机，持有该槽的补间句柄与运行时残影 | `DialogueView` 每槽一个，首次打开时建 |
 | `DialogueCatalog` | Luban 表 → `DialogueContent` / `DialogueCharacter` 的翻译与缓存，首次访问才读表 | 根作用域单例 |
 | `DialogueContent` | 与表无关的内容模型（节点、选项、立绘指令），构造时校验跳转 / 槽位 / 出口 | Catalog 产出，测试可直接 new |
 | `DialogueCharacter` | 角色 → 表情 → Addressables 地址的只读索引 | Catalog 产出 |
@@ -168,13 +171,17 @@ Controller、View、Rules、Focus、键位入口、气泡一律不碰 `Time.time
 
 | 行为 | 语义 | 落点 |
 | --- | --- | --- |
-| 打字 | `CharactersPerSecond × 倍速 × UnscaledDeltaTime` 累加，按 TMP 解析后的可见字符数计（富文本标签不计） | `DialogueController.cs:176`；`DialogueView.cs:87` |
+| 打字 | 每帧预算 `CharactersPerSecond × 倍速 × UnscaledDeltaTime` 交给 `DialogueTypingCadence.Advance` 换算显示字数，按 TMP 解析后的可见字符数计（富文本标签不计，`DialogueView.VisibleText` 给出解析后的字符序列） | `DialogueController.cs`（Typing 分支）；`DialogueTypingCadence.cs` |
+| 标点停顿 | 打出 `punctuationChars` 里的字后停 `punctuationPauseSeconds`（按「秒 × 基础速度」个字符预算扣，所以倍速下同比缩短，与自动间隔语义一致）；连续标点只在最后一个后停一次；句末标点不停；三连点补全 / 跳过直接 `RevealTo` 全量，不经节奏 | `DialogueTypingCadence.cs` |
 | 三连点补全 | Typing 中**相邻两次**点击间隔 ≤ `tapWindowSeconds` 才累计，满 `revealTapCount` 次补全；超窗从 1 重计 | `DialoguePlaybackPolicy.cs:57` |
 | 推进 | AwaitAdvance 单点即推进；Reveal / Advance 都提交 `Advance` 意图，规则自己区分补全与推进 | `DialogueRules.cs:76`；`DialogueController.cs:238` |
 | 倍速 | `speedSteps` 循环（默认 x1/x2/x4），同时缩放打字速度与自动间隔；每段对白回 0 档 | `DialoguePlaybackPolicy.cs:38` |
 | 自动 | AwaitAdvance 停留满 `autoAdvanceSeconds / 倍速` 自动推进；换节点清零 | `DialoguePlaybackPolicy.cs:78` |
 | 跳过 | 点跳过先开确认弹窗，**确认**后才开始；一经开始持续到本段结束；同步快进所有台词（记历史、写已读），**停在选项**；选完后继续跳到下一个选项或结束；`DialogueResult.Skipped = true`。取消则关弹窗照常继续 | `DialogueRules.cs:105`；`DialogueController.cs:117`、`398` |
-| 立绘 | 两槽：0 左、1 右。说话者一侧原色，另一侧压暗到 0.65 灰；旁白（无 speaker）两侧都原色 | `DialogueView.cs:96`；`DialogueController.cs:292` |
+| 立绘 | 两槽：0 左、1 右。Controller 先把新节点立绘**全部加载完**再逐槽 `SetPortrait`（加载期间旧图照常显示），由 View 按变化选动效：空 → 有 = 从本侧屏幕外滑入 `portraitSlideDistance` + 淡入（`portraitSlideSeconds`，OutCubic）；有 → 空 = 反向滑出 + 淡出（InCubic）后隐藏；同槽换图 = 交叉淡化（`portraitCrossfadeSeconds`，运行时残影 Image `<槽名>Ghost` 显示旧图淡出）；说话者原色原大，非说话者 `portraitDimColor`（只用 RGB）× `portraitDimScale`，过渡 `portraitDimSeconds`；旁白（节点无 speakerId）两侧都压暗 | `DialoguePortraitSlot.cs`；`DialogueController.cs`（`PrepareAsync`） |
+| 立绘动效时序 | 全部 `UpdateIgnoreTimeScale`；同槽再触发先 Cancel（入场中换表情先 `Complete` 入场）；面板 `OnDisable` 全部掐断并直接置终态、`OnOpenAsync` 清空两槽；存档恢复（此刻已是 Typing / AwaitAdvance）传 `instant: true` 直接置终态。上一节点的立绘句柄留到再下一次换节点 / 收尾才释放，保证退场与残影期间旧图有效 | `DialogueView.cs`（`OnDisable`、`OnOpenAsync`）；`DialogueController.cs`（`retiring`） |
+| 名牌 | `SetLine` 里说话者名与上一句不同才 punch：缩放 `nameTagPunchScale` → 1 + 透明度 0 → 1，`nameTagPunchSeconds`；同名连续不动；打开面板时清空记忆，第一句必 punch。名牌即 `SpeakerName` TMP 本身 | `DialogueView.cs`（`PunchName`） |
+| 对话框开合 | 预制体 `UIView.transition = SlideUp`（D4 的通用预设：从下方 40 px 滑入 + 淡入，关时反向），无额外代码 | `Prefabs/UI/DialogueView.prefab` |
 | 表情缺失 | 回退角色默认表情并埋 Warn；默认图也失败则隐藏该槽并埋 Error，不中断对白 | `DialogueController.cs:302` |
 | 选项 | 按 unscaled 时间每 0.25 s（`ChoiceRefreshInterval`）取一次条件快照刷新可用性，进入节点与提交后强制重算；不可用选项按 `hideWhenUnavailable` 隐藏或置灰并拼上原因；提交时规则再复验一次 | `DialogueController.cs:31`、`316`；`DialogueRules.cs:90` |
 | 选项图标 | `Choice.IconKey` 空 = 无图标（隐藏 `Icon`）；非空时先无图显示、异步加载完经 `SetChoiceIcon` 按选项 id 回填；按地址在**当前节点**内缓存，换节点 / 收尾整体释放；加载失败埋 Warn 不重试 | `DialogueController.cs:347`–`384`；`DialogueView.cs:147` |
@@ -253,7 +260,7 @@ Controller、View、Rules、Focus、键位入口、气泡一律不碰 `Time.time
 | 字段 | 预制体物体 | 备注 |
 | --- | --- | --- |
 | `speaker` / `body` | `SpeakerName`、`Body` | TMP；`body` 开富文本 |
-| `portraits[0]` / `portraits[1]` | `PortraitLeft` / `PortraitRight` | `Image`，**长度必须为 2** |
+| `portraits[0]` / `portraits[1]` | `PortraitLeft` / `PortraitRight` | `Image`，**长度必须为 2**。其 `anchoredPosition` 就是入场终点（首次打开时取一次）；首次换表情时运行时在同级复制出 `PortraitLeftGhost` / `PortraitRightGhost` 残影（不进预制体，美术同名替换不受影响）；缩放以 pivot 为中心，压暗时向外侧收 |
 | `tapArea` | `TapArea` | 全屏透明 Button，**层级在 `ChoiceRoot` 与控件按钮之下**，否则吞掉选项点击 |
 | `history` | `HistoryButton`（LOG） | |
 | `auto` / `autoLabel` | `AutoButton`、`AutoLabel` | 标签「自动」/「自动中」 |
@@ -307,14 +314,15 @@ Controller、View、Rules、Focus、键位入口、气泡一律不碰 `Time.time
 | 类型 | 位置 | 覆盖 |
 | --- | --- | --- |
 | EditMode | `Assets/_Project/Scripts/Tests/EditMode/Dialogue/DialogueRulesTests.cs`（8 条） | 补全 / 恢复不重记历史、选项复验、Skip 停在选项 / 写已读 / 环路抛错 / Generation 不符 |
-| EditMode | `.../DialoguePlaybackPolicyTests.cs`（9 条） | 三连点窗口、倍速循环、自动计时、重置、非法参数 |
+| EditMode | `.../DialoguePlaybackPolicyTests.cs`（14 条） | 三连点窗口、倍速循环、自动计时、重置、非法参数（含标点停顿为负、标点字符 null、动效参数缺省 / 未初始化 / 越界） |
+| EditMode | `.../DialogueTypingCadenceTests.cs`（12 条） | 无标点时与旧「累加取整」一致、标点后停顿、停顿中显示字数不变、停顿 0 / 标点表空退化、x2 下停顿减半、连续标点只停一次、句末不停、单帧大预算、Reset、非法参数 |
 | EditMode | `.../DialogueCatalogTests.cs`（8 条） | 读真实 `.bytes`：1001 / 1002 结构、立绘指令、每个表情有地址、条件选项、选项图标键 |
 | EditMode | `.../DialogueInteractableTests.cs`（14 条，含参数化） | 三维距离判范围、无树台词按序循环、有树未绑定 / 无树无台词不可交互、`SelectNearest` 跳过超范围；交互提示键位显示串为空回退「E」、「对话 · 名字」拼接 |
 | EditMode | `Assets/_Project/Scripts/Tests/EditMode/Dialogue/DialogueServiceTests.cs`（6 条） | 进行中重入抛 `InvalidOperationException`；未知 id 抛 `ArgumentException` 且不碰暂停 / 输入；Present 异常时清理并发 `OnEnded`；对白期间 Dialogue 图开、Gameplay 图关，取消 / 异常后对称恢复，进来前关着的 Gameplay 不被打开 |
 | EditMode | `.../DialogueReadStoreTests.cs`（3 条） | 空档案读入为空；写 3 个键后新 store 读回一致且原地填充同一实例；同帧两次对白结束只写一次（计数 `ISaveService` 装饰器包临时目录 `JsonSaveService`） |
 | EditMode | `.../DialogueKeyboardInputTests.cs`（9 个方法 / 30 例） | 键位映射：主面板各键、未激活 / 未就绪忽略、选项期 Advance 忽略、Choice N 越界 / 不可用 / 空行忽略、历史与跳过确认期只放行弹窗键 |
 | EditMode | `Assets/_Project/Scripts/Tests/EditMode/Core/WorldPauseServiceTests.cs` | 暂停引用计数与 timeScale 恢复（Core 侧） |
-| Showcase | `Assets/_Project/Scripts/Tests/Showcase/Dialogue/DialogueShowcase.cs`（6 条） | 交互 → 打字 → 选项 → 结束且全程时停；跳过（经确认）停在选项；点击旅人拉起 1002；`SkipCancelled_DialogueContinues`；`Focus_ShowsHudButton_AndHudClickStartsDialogue`；`Bubble_ShowsAboveHead_WithoutPausing` |
+| Showcase | `Assets/_Project/Scripts/Tests/Showcase/Dialogue/DialogueShowcase.cs`（7 条） | `Portraits_SlideInCrossfadeAndDimNonSpeaker`（长者滑入瞬态 → l2 旅人入场、长者压暗 → l3 反转 → c1 换表情交叉淡化）；交互 → 打字 → 选项 → 结束且全程时停；跳过（经确认）停在选项；点击旅人拉起 1002；`SkipCancelled_DialogueContinues`；`Focus_ShowsHudButton_AndHudClickStartsDialogue`；`Bubble_ShowsAboveHead_WithoutPausing` |
 | 验证场景 | `Assets/_Project/Scenes/Verify/Dialogue.unity`（2D） | `Main Camera`（`Physics2DRaycaster`）、`Player`（Actor）、`Elder`（1001）、`Traveler`（1002）、`Villager`（无树 + 气泡） |
 
 跑 `/unity-test EditMode Dialogue`；视觉验收跑 `/verify-module Dialogue`（编辑器须打开）。
