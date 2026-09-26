@@ -4,6 +4,7 @@
     "references": [
         "Game.Core",
         "Game.Runtime",
+        "Game.Editor",
         "UniTask",
         "Luban.Runtime",
         "Unity.Addressables",
@@ -13,6 +14,7 @@
         "MessagePipe.VContainer",
         "Unity.RenderPipelines.Universal.Runtime",
         "Unity.InputSystem",
+        "Unity.Timeline",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
