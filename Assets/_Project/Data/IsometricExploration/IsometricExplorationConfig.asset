@@ -14,6 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   cameraSmoothTime: 0.2
   showStickOnDesktop: 0
+  showCompass: 0
   compassEdgeMargin: 48
   compassLabelMax: 6
   runLabel: "\u5954\u8DD1"
@@ -21,3 +22,4 @@ MonoBehaviour:
   resetMessage: "\u91CD\u7F6E\u6545\u4E8B\u8FDB\u5EA6\uFF1F\u4EFB\u52A1\u4E0E\u7269\u8D44\u7BB1\u5C06\u56DE\u5230\u521D\u59CB\u72B6\u6001\u3002"
   resetConfirmText: "\u91CD\u7F6E"
   resetCancelText: "\u53D6\u6D88"
+  occluderProbeRadius: 1

@@ -13,6 +13,9 @@ namespace Game.IsometricExploration
         // —— PRP/exploration-whitebox 波 3 追加：探索 HUD 的控件、万向标与重置文案。
         [SerializeField, Tooltip("开发用开关：桌面平台也显示触屏控件（摇杆 / 三键 / 走跑按钮），默认关；正式只在触屏平台显示")]
         private bool showStickOnDesktop = false;
+        [SerializeField, Tooltip("屏幕四周对全部屏外兴趣点画贴边标记；默认关（用户决定：会显得屏幕乱，任务追踪指引由 Quest 负责），"
+            + "调试或将来做附近提示时再开")]
+        private bool showCompass = false;
         [SerializeField, Min(0f), Tooltip("万向标贴屏幕边时的内缩像素")]
         private float compassEdgeMargin = 48f;
         [SerializeField, Min(0), Tooltip("万向标标签最多显示几个字，超出截断；0 = 不显示标签")]
@@ -34,6 +37,7 @@ namespace Game.IsometricExploration
         private float occluderProbeRadius = 1f;
 
         public bool ShowStickOnDesktop => showStickOnDesktop;
+        public bool ShowCompass => showCompass;
         public float CompassEdgeMargin => compassEdgeMargin;
         public int CompassLabelMax => compassLabelMax;
         public string RunLabel => runLabel;

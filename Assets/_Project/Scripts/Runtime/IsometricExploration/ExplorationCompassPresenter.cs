@@ -75,6 +75,7 @@ namespace Game.IsometricExploration
             this.bootCompleted = bootCompleted ?? throw new ArgumentNullException(nameof(bootCompleted));
             this.hudChanged = hudChanged ?? throw new ArgumentNullException(nameof(hudChanged));
             this.telemetry = telemetry ?? NullTelemetryScope.Instance;
+            Enabled = config.ShowCompass;
         }
 
         /// <summary>已登记的兴趣点（含已销毁待清理项）。供回放 / 调试读取。</summary>
@@ -82,6 +83,13 @@ namespace Game.IsometricExploration
 
         /// <summary>本帧显示中的万向标个数。</summary>
         public int ShownCount => shownCount;
+
+        /// <summary>
+        /// 万向标总开关：初值取 <see cref="IsometricExplorationConfig.ShowCompass"/>（默认关——用户决定：
+        /// 全部兴趣点都标识会显得屏幕乱，任务追踪指引已由 Quest 负责）。关闭时 <see cref="Tick"/> 跳过扫描与摆位，
+        /// 只在刚关闭那一帧收起已显示的标记；调试或将来做附近提示时可运行时开。回放用它显式打开来验证摆位规则。
+        /// </summary>
+        public bool Enabled { get; set; }
 
         public void Start()
         {
@@ -104,6 +112,12 @@ namespace Game.IsometricExploration
         public void Tick()
         {
             if (disposed || hud == null || hudHidden) return;
+
+            if (!Enabled)
+            {
+                if (shownCount > 0) HideFrom(0);
+                return;
+            }
 
             Camera camera = binder.SceneCamera;
             if (camera == null)

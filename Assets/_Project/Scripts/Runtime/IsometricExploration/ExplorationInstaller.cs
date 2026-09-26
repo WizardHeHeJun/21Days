@@ -57,7 +57,7 @@ namespace Game.IsometricExploration
                     resolver.Resolve<IsometricExplorationConfig>(),
                     resolver.Resolve<ISubscriber<BootCompletedEvent>>(),
                     resolver.Resolve<ISubscriber<HudVisibilityChangedEvent>>(),
-                    resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton);
+                    resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton).AsSelf();
 
             // —— PRP/exploration-whitebox 波 9 追加：遮挡半透明（相机 → 玩家视线上的 SceneOccluder 变半透明）。
             builder.RegisterEntryPoint(resolver => new OccluderFadePresenter(
