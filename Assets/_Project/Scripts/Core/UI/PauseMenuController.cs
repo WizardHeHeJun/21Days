@@ -14,6 +14,7 @@
 
 using System;
 using Cysharp.Threading.Tasks;
+using Game.Core.Boot;
 using Game.Core.Events;
 using Game.Core.Flow;
 using Game.Core.Input;
@@ -309,16 +310,8 @@ namespace Game.Core.UI
             }
         }
 
-        private void HandleQuit()
-        {
-            Log.Info("暂停菜单：退出游戏");
-#if UNITY_EDITOR
-            // 仅调试用途：编辑器里 Application.Quit 不生效，改为退出 Play 模式。
-            UnityEditor.EditorApplication.isPlaying = false;
-#else
-            Application.Quit();
-#endif
-        }
+        // 退出实现与标题界面共用，见 Boot/GameQuit。
+        private void HandleQuit() => GameQuit.Quit("暂停菜单");
 
         // 菜单被 UIService 从外部关掉（Esc 走 CloseTopAsync，或别的代码关的）：只收尾会话，不再调 ui.CloseAsync。
         private void HandleViewClosed()

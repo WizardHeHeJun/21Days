@@ -146,6 +146,30 @@ namespace Game.Core.UI
         public virtual UniTask OnCloseAsync(CancellationToken ct) => UniTask.CompletedTask;
 
         /// <summary>
+        /// 给按钮挂点击监听（在 <see cref="OnOpenAsync"/> 里用）。先 Remove 再 Add：
+        /// OpenAsync 对已开面板会再调一次 OnOpenAsync，这样不会叠两份监听。按钮为空时什么都不做。
+        /// </summary>
+        protected static void Hook(Button button, UnityEngine.Events.UnityAction handler)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.onClick.RemoveListener(handler);
+            button.onClick.AddListener(handler);
+        }
+
+        /// <summary>摘掉 <see cref="Hook"/> 挂的监听（在 <see cref="OnCloseAsync"/> 里成对调用）。按钮为空时什么都不做。</summary>
+        protected static void Unhook(Button button, UnityEngine.Events.UnityAction handler)
+        {
+            if (button != null)
+            {
+                button.onClick.RemoveListener(handler);
+            }
+        }
+
+        /// <summary>
         /// 打开过渡。默认按 <see cref="Transition"/> 分派到 Fade / SlideUp / SlideDown / Scale 四种预设；
         /// <paramref name="seconds"/> 来自 <see cref="UIConfig.TransitionSeconds"/>，为 0 时直接置终值不等帧。
         /// <para>

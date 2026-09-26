@@ -92,25 +92,6 @@ namespace Game.Core.UI.Views
             }
         }
 
-        private static void Hook(Button button, UnityEngine.Events.UnityAction handler)
-        {
-            if (button == null)
-            {
-                return;
-            }
-
-            button.onClick.RemoveListener(handler);
-            button.onClick.AddListener(handler);
-        }
-
-        private static void Unhook(Button button, UnityEngine.Events.UnityAction handler)
-        {
-            if (button != null)
-            {
-                button.onClick.RemoveListener(handler);
-            }
-        }
-
         private void RaiseResume() => OnResume?.Invoke();
 
         private void RaiseSettings() => OnSettings?.Invoke();
