@@ -87,11 +87,11 @@ Crates
 
 ```text
 Environment_Graybox（场景根）
-├─ Ground / Wall_Back / Wall_Left / Tower / Stairs
+├─ Ground / Wall_Back(SceneOccluder) / Wall_Left(SceneOccluder) / Tower(SceneOccluder) / Stairs
 ├─ Fence / Cone_1..3 / Bench_1..2
 └─ MultiLevel（波 9：多层平台，对标「旅行小记」的上下层）
-   ├─ Ground_East / Deck_Upper(SceneOccluder) / Ramp_South / Bridge_West(SceneOccluder)
-   ├─ Stairs_West（Stairs_West_Step_1..9）
+   ├─ Ground_East / Deck_Upper(SceneOccluder) / Ramp_South(SceneOccluder) / Bridge_West(SceneOccluder)
+   ├─ Stairs_West（Stairs_West_Step_1..9，均挂 SceneOccluder）
    └─ Railings（Rail_Bridge_S/N、Rail_Deck_N/E/S1/S2/W1/W2，均挂 SceneOccluder）
 
 GlobalVolume（场景根，Global + ExplorationVolumeProfile）
@@ -119,17 +119,28 @@ GlobalVolume（场景根，Global + ExplorationVolumeProfile）
 （墙、围栏、长椅、路障、栏杆、塔）；0.3 的台阶、坡面、桥底与甲板底不挡。NPC / 物资箱在 Default 层，不挡路。
 新加的可站立平台若底面离地低于 1.5 m，人会被它从侧面挡住——想让人从下面走过就把底面放到 1.5 m 以上。
 
-## 遮挡半透明（波 9）
+## 遮挡半透明（波 9 建，波 10 改粗射线 + 过渡）
 
-`OccluderFadePresenter`（`Runtime/IsometricExploration/OccluderFadePresenter.cs`，`ExplorationInstaller` 注册的入口点）
-每帧从 `QuestSceneBinder.SceneCamera` 向 `PlayerAnchor + (0, 0.8, 0)`（胸口）打一条 `Physics.RaycastNonAlloc`
-（只打 `Ground` 层，预分配 8 个结果；Collider → `SceneOccluder` 查找结果按 Collider 缓存，场景卸载清缓存），
-命中挂了 `SceneOccluder` 的物体就 `SetFaded(true)`，上一帧淡出、本帧没命中的恢复。纯表现，不回写玩法状态。
+`OccluderFadePresenter`（`Runtime/IsometricExploration/OccluderFadePresenter.cs`，`ExplorationInstaller` 注册的入口点，
+构造注入 `QuestSceneBinder` 与 `IsometricExplorationConfig`）每帧从 `QuestSceneBinder.SceneCamera` 向
+`PlayerAnchor + (0, 0.8, 0)`（胸口）扫一根**粗射线** `Physics.SphereCastNonAlloc`：半径取配置 `OccluderProbeRadius`
+（默认 1.0 m），距离 = 相机到胸口 − 半径（纯规则 `OccluderFadePresenter.TryBuildProbe`，EditMode 有测），球停在胸口前一个半径处，
+不把脚下地面扫进来；只扫 `Ground` 层，预分配 16 个结果；Collider → `SceneOccluder` 查找结果（含「没挂」）按 Collider 缓存，场景卸载清缓存。
+扫到挂了 `SceneOccluder` 的物体就 `SetFaded(true)`，上一帧淡出、本帧没扫到的恢复。地面（`Ground` / `Ground_East`）不挂，
+扫到只缓存成 null，不报错不误淡。纯表现，不回写玩法状态。
+波 9 的细射线只在物体正压住胸口时才淡出，前景的 `Tower`（顶高 9.39）在玩家走西侧楼梯时从视线旁擦过、挡住半个画面却不淡——
+粗射线就是为这种「挡住人周围」的情况。
 
 `SceneOccluder`（`Runtime/IsometricExploration/SceneOccluder.cs`）挂在要淡出的几何体上，字段 `fadedMaterial`
-（灰盒拖 `Art/Materials/Graybox/M_Graybox_Faded.mat`：URP Lit 透明、Alpha 0.35、不投影不写深度）；
-只切 `Renderer.sharedMaterial` 引用，原材质在 Awake 缓存，不改材质资产内容；禁用时自动恢复。
-当前挂在 `Bridge_West`、`Deck_Upper` 与 `Railings` 下 8 段栏杆（1 m 高的深色栏杆同样会把人压住，只淡桥面不够）。
+（灰盒拖 `Art/Materials/Graybox/M_Graybox_Faded.mat`：URP Lit 透明、Alpha 0.35、不投影不写深度）与 `fadeSeconds`（默认 0.15）；
+过渡：变淡时立刻换上半透明材质，用 `MaterialPropertyBlock` 把 `_BaseColor` 从「原材质颜色、alpha 1」插值到半透明材质自身颜色；
+恢复时反向插值后换回原材质；到终态就清掉属性块。插值由呈现器只对「正在过渡」的对象调 `Advance(unscaledDeltaTime)`，
+静止时零开销。`fadeSeconds = 0` 或材质没有 `_BaseColor` 时直接切换。不改材质资产内容；禁用时立刻恢复原样。
+`IsFaded` 是目标状态（恢复过渡中已为 false，`sharedMaterial` 要等过渡结束才换回）。
+
+当前挂 `SceneOccluder` 的物体（共 23 个）：`Bridge_West`、`Deck_Upper`、`Railings` 下 8 段栏杆（波 9），
+`Tower`、`Ramp_South`、`Stairs_West_Step_1..9`、`Wall_Left`、`Wall_Back`（波 10）。不挂：`Ground`、`Ground_East`、
+围栏、长椅、锥桶（矮，不挡）。
 
 构图提示：相机→胸口的视线俯角约 40°，离地 2.6 m 的桥 / 甲板挡住的是它**北侧**约 2～3 m 的人，
 站在桥正中下方反而看得见（回放用 (17.25, 12.3) 验证桥淡出）。
@@ -221,9 +232,15 @@ ExplorationHudView（RectTransform 铺满，CanvasGroup，ExplorationHudView）
   `IGameFlow.GoToAsync<MonsterEncounterState>()`（退出当前遭遇状态卸载场景，重新加载后玩家回出生点，
   箱子随 `LootResetEvent` 合上）；取消 / 弹窗被关掉都按「取消」处理，不抛异常。埋点
   `progress_reset` / `progress_reset_cancelled` / `progress_reset_failed`（Error）。
+- **万向标默认关闭（2026-09-26 用户决定）**：`ExplorationCompassPresenter.Enabled`（`bool` 读写属性，
+  初值取 `IsometricExplorationConfig.ShowCompass`，默认 `false`）——全部兴趣点都标识会显得屏幕乱，任务
+  追踪的指引已由 Quest 模块负责（追踪目标画头顶标记 / 引导）。`Tick` 在 `!Enabled` 时直接跳过扫描与摆位
+  这些重活，只在关闭当帧收起已显示的标记。调试或将来做「附近兴趣点提示」时把 `ShowCompass` 勾上，或运行时
+  `Resolve<ExplorationCompassPresenter>().Enabled = true`（回放 `Compass_ShowsOffscreenPoiAndHidesWhenImmersive`
+  就是这样打开验证摆位规则的）。
 - **万向标**（`ExplorationCompassPresenter` + `ExplorationCompassRules`）：`sceneLoaded` 扫描全部
   `ExplorationPointOfInterest`（含未激活），标签在登记时按 `IsometricExplorationConfig.CompassLabelMax`
-  截好；每帧对可见兴趣点 `Camera.WorldToViewportPoint` → `ExplorationCompassRules.TryPlace`（屏内返回
+  截好；开启后每帧对可见兴趣点 `Camera.WorldToViewportPoint` → `ExplorationCompassRules.TryPlace`（屏内返回
   `false` 不画，屏外 / 身后贴边并给出箭头角度，复用 `QuestGuidanceMath.Solve`）；标记走对象池，只在
   需要更多槽位时从 `CompassMarkerTemplate` 复制，不逐帧销毁重建。`CompassRoot` / `CompassMarkerTemplate`
   未接线时报一次 Error 并埋 `compass_template_missing`，之后每帧静默跳过。沉浸时整体隐藏（`HideFrom(0)`）。
@@ -438,6 +455,15 @@ ResetButton
 - 贴地投影是表现层：`groundMask` 只影响 `EncounterSceneView` 里纸片的世界 Y，逻辑层没有高度、
   不做视线判定，玩法规则依旧不读取贴地结果（怪物感知不会被桥 / 墙挡住）；
 - 两角色重合时 `NameTag` 会叠在一起，没有做避让或层级排序。
+
+### 关卡设计约束（遮挡）
+
+- 相机在玩家**南侧**、俯角约 38°、FOV 28（长焦）：近处的高物体在屏幕上占比很大。凡是**高于 1.5 m 且位于可行走区域南侧**
+  的物体，都会在某些站位挡住玩家，**必须挂 `SceneOccluder`**（`fadedMaterial` 拖 `M_Graybox_Faded.mat`，放在 `Ground` 层，
+  带 Collider——没有 Collider 扫不到）；北侧的墙挂上也无害（玩家贴墙北侧走时视线会穿过它）。
+- 美术替换时把高物体（塔、树、建筑）尽量放到可行走区域**北侧或边缘**，少让它们站在玩家与相机之间。
+- 淡出只看「相机 → 胸口」这一根 1 m 粗的扫掠：离视线超过半径的物体即使在画面里挡住别的东西（NPC、箱子）也不淡；
+  需要更早淡出就调大 `OccluderProbeRadius`。
 
 ## 验证入口
 

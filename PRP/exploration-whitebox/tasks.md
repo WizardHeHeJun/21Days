@@ -97,3 +97,26 @@
   - 证据：回放截图右上可见「怪物生命 3 状态 …」与警戒条，左上只剩任务栏。
 - [x] T23 验证与文档：6 个 `.cs` + 2 个测试文件 lint 退出码均 0；`refresh_unity` 后 `read_console(error)` 无 CS 错误（只有 TestRunner 内部 `PlaymodeLauncher` 空引用噪音）；`Logs/verify/exploration/20260926-050244/report.md` PASS 7/7（49 个检查点全绿，0 异常）；`Logs/verify/isometricexploration/20260926-050349/report.md` PASS 2/2（潜行走廊未被挡）。`isometricexploration-module-guide.md`（场景结构 / 遮挡半透明 / 已知限制 / 验证入口）、`monster-module-guide.md`（白盒遮挡碰撞小节）、`pitfalls.md` 两条（MCP 改场景要当场保存；等距相机下桥挡的是北侧的人）。
 - 待人看：`Logs/verify/exploration/20260926-050244/12-站上甲板·多层.png`、`11-坡道脚下.png`、`13-桥挡视线·半透明.png`、`01-围栏挡住玩家.png`。
+
+## 波 10（opus）——遮挡淡出通用化（粗射线 + 过渡 + 追挂遮挡物，2026-09-26）
+
+设计与偏离见 `prp.md` 3.5 末尾「波 10 追加」。
+
+- [x] T24 粗射线探测：`OccluderFadePresenter` 改 `SphereCastNonAlloc`（半径 `OccluderProbeRadius` 默认 1.0，距离扣半径，`MaxHits` 16，纯规则 `TryBuildProbe`）；`IsometricExplorationConfig` 追加字段，资产经 `manage_scriptable_object` 写入 `occluderProbeRadius: 1`；`ExplorationInstaller` 多传配置（偏离：任务书未列此文件）。
+  - 证据：新 EditMode `OccluderFadePresenterTests` 5 条；EditMode 498/498。
+- [x] T25 淡入淡出过渡：`SceneOccluder` 追加 `fadeSeconds`（0.15）+ `Advance(dt)` / `IsTransitioning`，`MaterialPropertyBlock` 插 `_BaseColor`；呈现器只推进 `animating` 列表，终态清属性块。
+  - 证据：回放「塔体恢复原材质（过渡结束后换回）」通过。
+- [x] T26 追挂 `SceneOccluder`（`fadedMaterial` = `M_Graybox_Faded.mat`）：`Tower`、`Ramp_South`、`Stairs_West_Step_1..9`、`Wall_Left`、`Wall_Back`；SampleScene 经 `execute_code` 挂组件后同一调用内 `SaveScene`，场景内 `SceneOccluder` 共 23 个。
+  - 证据：`git diff -U0 --histogram -- Assets/Scenes/SampleScene.unity | grep "m_Name:"` 只有 13 行空的 `+  m_Name: `（新 MonoBehaviour 组件块自带的空名字段，不是新物体）。
+- [x] T27 回放：新增 `Occluder_FadesTowerWhenPlayerOnStairs`（(13.8, 15.5) 塔淡出 → (2, 3.4) 恢复），桥用例保留。
+  - 证据：`Logs/verify/exploration/20260926-054051/report.md` 8 条里 7 PASS；唯一失败 `Crate_CollectGivesRewardAndQuestProgress`「正文为铁剑 ×1」——另一会话把 SampleScene 里 `Crate_A.itemId` 从 1001 改成 1005，不是本波改动；`Logs/verify/isometricexploration/20260926-054212` PASS 2/2。截图 `15-塔挡视线·半透明.png`、`16-离开·塔体恢复.png`、`13-桥挡视线·半透明.png`。
+- [x] T28 文档：`isometricexploration-module-guide.md`（场景结构、遮挡半透明小节、已知限制下「关卡设计约束（遮挡）」）。
+- [x] T29 开箱通知断言改数据驱动：`ExplorationShowcase` 删 `CrateABody` 常量，新增 `ExpectedRewardBody(crate)`——名字查 `IConfigService.Tables.TbItem.GetOrDefault(itemId).Name`（本程序集不引用 Luban.Runtime，取表行与 `Name` 字段走反射；查不到用「#id」同 LootService），正文 = `LootService.ComposeBody(LootConfig.RewardBodyFormat, 名字, count)`；SampleScene 的 1005 不动。
+  - 证据：lint 退出码 0；编译绿；`Logs/verify/exploration/20260926-055102/report.md` PASS（正文「破旧信笺 ×1」，Crate_A = tbitem 1005）。
+
+## 波 11（sonnet）——万向标默认关闭（2026-09-26，用户决定）
+
+用户决定：全部兴趣点都标识会显得屏幕乱，任务追踪的指引已由 Quest 模块负责，万向标默认关闭。设计与取舍见 `prp.md` 3.2 `ExplorationCompassPresenter` 行。
+
+- [x] T30 `IsometricExplorationConfig` 新增 `[SerializeField] bool showCompass = false` + 只读属性 `ShowCompass`；`IsometricExplorationConfig.asset` 经 `manage_scriptable_object` 显式写 `showCompass: false`。`ExplorationCompassPresenter` 新增读写属性 `Enabled`（构造时取 `config.ShowCompass`），`Tick` 在 `!Enabled` 时跳过扫描 / 摆位（只在关闭当帧收起已显示标记）；`ExplorationInstaller` 给万向标那条 `RegisterEntryPoint` 追加 `.AsSelf()`，回放按具体类型解析。`ExplorationShowcase.Compass_ShowsOffscreenPoiAndHidesWhenImmersive` 开头加检查点「默认关闭：出生点没有激活万向标克隆」，随后 `Step` 显式 `ResolveService<ExplorationCompassPresenter>().Enabled = true` 打开再走原有断言；排查确认其余用例（`Crate_*`、`Reset_*`、`Collision_*`、`MultiLevel_*`、`Occluder_*`）都不依赖万向标激活状态，未改动。
+  - 证据：4 个 `.cs`（`IsometricExplorationConfig`、`ExplorationCompassPresenter`、`ExplorationInstaller`、`ExplorationShowcase`）lint 退出码均 0；`refresh_unity(compile=request)` 后 `read_console(error)` 0 条（此后另一并发会话改 `Core/Boot/GameLifetimeScope.cs` 引入 `CS0246 TitleLoadClickedEvent` 未定义，与本波无关，不在本波允许改动的文件范围内，未处理）；EditMode 645/645；PlayMode `ExplorationShowcase` 全部 8 条（`Controls_RunToggleViaKeyAndTouchControlsHiddenOnDesktop`、`Compass_ShowsOffscreenPoiAndHidesWhenImmersive`、`Crate_CollectGivesRewardAndQuestProgress`、`Reset_RestoresQuestsAndCrates`、`Collision_FenceBlocksPlayer`、`MultiLevel_RampLeadsToDeck`、`Occluder_FadesBridgeWhenPlayerBeneath`、`Occluder_FadesTowerWhenPlayerOnStairs`）PASS（job `0628f58b32254a54a2cd2eb831ef6d3b`，8/8，54.3s）。`isometricexploration-module-guide.md`、`prp.md` 3.2 已同步默认关闭说明。

@@ -49,7 +49,7 @@
 | `ExplorationControlsPresenter : IStartable, ITickable, IDisposable`（新） | 等 `ui.Get<ExplorationHudView>()` 非空后绑定：走跑标签每帧读 `PlayerModel.IsRunning`（潜行时仍显示模式）；摇杆 / 触屏三键 / RunToggle 统一按 `IPlatformService.IsTouchPrimary || config.ShowStickOnDesktop` 显示（2026-09-26 用户决定 PC 优先：默认仅触屏显示，代码与预制体保留），PC 走跑走 `Gameplay/Run`（左 Ctrl / 手柄左摇杆按下）；`SupplyCrateFocus.OnFocusChanged` → 提示显隐；`ResetClicked` → `ui.OpenAsync<ExplorationConfirmView>()` → 确认后 `quest.ResetProgress()`、`loot.Reset()`、`flow.GoToAsync<MonsterEncounterState>()`。 |
 | `ExplorationPointOfInterest : MonoBehaviour`（新） | `label`、`kind`(Npc / Crate / Location)；`IsVisible`：Crate 类型取同物体 `SupplyCrate.IsOpened == false`，其余恒 true。 |
 | `ExplorationCompassRules`（纯 C#，新） | 输入：兴趣点视口坐标列表、画布尺寸、边距；输出：屏外者的贴边位置与角度（复用 `QuestGuidanceMath.Solve`），屏内者不画。EditMode 测试。 |
-| `ExplorationCompassPresenter : IStartable, ITickable, IDisposable`（新） | `sceneLoaded` 扫描 `ExplorationPointOfInterest`；相机 / 玩家锚点取 `QuestSceneBinder.SceneCamera / PlayerAnchor`；每帧按规则摆标记（对象池，复用模板）；订阅 `HudVisibilityChangedEvent` 沉浸时整体隐藏（HUD 本身已隐藏，这里只是省每帧开销）。 |
+| `ExplorationCompassPresenter : IStartable, ITickable, IDisposable`（新） | `sceneLoaded` 扫描 `ExplorationPointOfInterest`；相机 / 玩家锚点取 `QuestSceneBinder.SceneCamera / PlayerAnchor`；每帧按规则摆标记（对象池，复用模板）；订阅 `HudVisibilityChangedEvent` 沉浸时整体隐藏（HUD 本身已隐藏，这里只是省每帧开销）。**2026-09-26 用户决定默认关闭**：新增 `Enabled` 读写属性（初值取 `IsometricExplorationConfig.ShowCompass`，默认 false），关闭时 `Tick` 跳过扫描与摆位——全部兴趣点都标识会显得屏幕乱，任务追踪指引已由 Quest 负责。 |
 | `ExplorationConfirmView : UIView(Popup)`（新） | `message`、`confirm`、`cancel`；`OpenAsync(arg: string)`；预制体 `Prefabs/UI/ExplorationConfirmView.prefab`，地址同名。 |
 | `ExplorationConfig`（若对方已建则追加字段；否则新建 SO） | `ShowStickOnDesktop`(true)、`CompassEdgeMargin`(48)、`RunLabel`("奔跑")、`WalkLabel`("散步")、`ResetMessage`。 |
 
@@ -74,6 +74,8 @@
 | 胶囊高度语义（澄清） | `bottomOffset / topOffset` 指胶囊**下沿 / 上沿**离脚底的高度，端点球心各往里收一个半径；若把 0.35 当球心，胶囊下沿只高出脚底 0.05，0.3 的台阶会被当成墙。 |
 | 遮挡半透明 | `SceneOccluder`（`fadedMaterial`，切 `sharedMaterial` 引用）挂 `Bridge_West`、`Deck_Upper` 与 8 段栏杆（偏离任务书「栏杆不挂」：回放截图里桥面淡了，1 m 高的深色南栏杆仍把人整个压住）；`OccluderFadePresenter`（`ExplorationInstaller` 入口点）每帧相机 → 玩家胸口（+0.8）`RaycastNonAlloc`（8 个、只打 `Ground`），命中淡出、离开恢复，Collider → 组件查找按 Collider 缓存，`sceneUnloaded` 清缓存。材质 `Art/Materials/Graybox/M_Graybox_Faded.mat`（M_Wall 复制，URP Lit Transparent，Alpha 0.35，关 DepthOnly / ShadowCaster）。构图事实：视线俯角约 40°，离地 2.6 m 的桥挡住的是它北侧 2～3 m 的人，站桥正中下方相机看得见——回放改用 (17.25, 12.3)。 |
 | 调试文字 | `EncounterSceneView.OnGUI` 两行状态 + 警戒条挪到右上「返回标题」按钮下方（x = 屏宽 − 16 − 480，y 64 / 92 / 124，右对齐）；按钮不动。 |
+
+> **波 10 追加（2026-09-26，遮挡淡出通用化）**：用户反馈走西侧楼梯时前景 `Tower` 挡住半个画面不淡。① 探测改粗射线：`Physics.SphereCastNonAlloc`，半径 `IsometricExplorationConfig.OccluderProbeRadius`（默认 1.0），终点胸口前一个半径（纯规则 `OccluderFadePresenter.TryBuildProbe`），16 个结果；地面不挂组件，扫到只缓存成 null。② `SceneOccluder` 追加 `fadeSeconds`（0.15）：淡出立刻换半透明材质，`MaterialPropertyBlock` 把 `_BaseColor` 从「原色 α1」插到半透明材质色，恢复反向插完再换回；呈现器只推进过渡中的对象，终态清属性块。③ 追挂 `Tower`、`Ramp_South`、`Stairs_West_Step_1..9`、`Wall_Left`、`Wall_Back`（共 23 个）。④ 偏离：`ExplorationInstaller` 构造注册多传一个 `IsometricExplorationConfig`（不改就读不到新字段）；回放塔用例站位改 (13.8, 15.5)——(16, 15.5) 实测塔离视线约 1.5 m、视线从塔顶上方越过，不压人。⑤ 设计约束（写进 guide「关卡设计约束」）：相机在南、俯角 38°、FOV 28，高于 1.5 m 且在可行走区南侧的物体必须挂 `SceneOccluder`。
 
 ## 4. 验收标准（每条被 tasks.md 覆盖）
 
