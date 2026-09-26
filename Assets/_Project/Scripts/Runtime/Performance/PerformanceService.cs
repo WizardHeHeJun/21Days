@@ -3,6 +3,7 @@
 // 为什么新建（复用 → 扩展 → 新建）：PerformanceRules 只管阶段语义、PerformanceStage 只管时间轴，二者都不该持有
 //   时停 / 输入图 / UI / 相机 / 存档这类会话级资源；DialogueService 是对白专用且 Performance 不得依赖 Dialogue，只能新建。
 using System;
+using System.Reflection;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Game.Core.Assets;
@@ -31,6 +32,9 @@ namespace Game.Performance
     /// 取消语义：<c>ct</c> 取消时规则置 Cancelled、照常收尾并广播 Ended(Cancelled)，然后抛 <see cref="OperationCanceledException"/>
     /// （UniTask 约定，同 DialogueService）；Cancelled / Failed 不记「已播」。
     /// </para>
+    /// <para>
+    /// 舞台相机的渲染器在运行时对齐主相机（URP 只允许同类渲染器叠加），演出预制体里不用手选渲染器。
+    /// </para>
     /// </summary>
     public sealed class PerformanceService : IPerformanceService, IGameService
     {
@@ -45,6 +49,13 @@ namespace Game.Performance
         private const string KeyboardPathPrefix = "<Keyboard>";
         private const string FallbackSkipKey = "跳过";
         private const float FallbackCameraDepthOffset = 10f;
+
+        /// <summary>
+        /// 相机当前渲染器索引。URP 14 没有公开 getter，只能反射读私有序列化字段 <c>m_RendererIndex</c>——
+        /// URP 14.0.12 私有字段，升级 URP 时核对；取不到时 <see cref="ReadRendererIndex"/> 返回 -1，改走渲染器类型比较。
+        /// </summary>
+        private static readonly FieldInfo RendererIndexField =
+            typeof(UniversalAdditionalCameraData).GetField("m_RendererIndex", BindingFlags.NonPublic | BindingFlags.Instance);
 
         private readonly PerformanceConfig config;
         private readonly PerformanceRules rules;
@@ -390,6 +401,8 @@ namespace Game.Performance
             internal Camera Stage;
             internal UniversalAdditionalCameraData StageData;
             internal CameraRenderType StageRenderType;
+            internal bool RendererChanged;
+            internal int StageRendererIndex;
             internal UniversalAdditionalCameraData MainData;
             internal bool Stacked;
             internal bool Fallback;
@@ -398,8 +411,9 @@ namespace Game.Performance
             internal Color StageBackground;
         }
 
-        // 舞台相机（Overlay）叠进 Camera.main 的 URP 相机栈；主相机缺 URP 数据、本身不是 Base、或渲染器不支持叠加时
-        // 退路：舞台相机改 Base、深度高于主相机、纯黑底，记 Warn + 埋 camera_stack_unavailable（prp 2.3）。
+        // 舞台相机（Overlay）叠进 Camera.main 的 URP 相机栈；叠加前先把舞台相机的渲染器对齐主相机（URP 规定渲染器类型不同的
+        // 相机不能叠加，否则每帧告警并整段跳过渲染），预制体里不用手选渲染器。主相机缺 URP 数据、本身不是 Base、渲染器不支持叠加、
+        // 或对齐后渲染器类型仍不一致时退路：舞台相机改 Base、深度高于主相机、纯黑底，记 Warn + 埋 camera_stack_unavailable（prp 2.3）。
         private void AttachCamera(string id, PerformanceStage stage, ref CameraStackState state)
         {
             Camera stageCamera = stage.StageCamera;
@@ -422,7 +436,20 @@ namespace Game.Performance
             bool canStack = main != null && main != stageCamera
                 && main.TryGetComponent(out mainData)
                 && mainData.renderType == CameraRenderType.Base;
+            bool rendererMismatch = false;
             if (canStack)
+            {
+                // 对齐渲染器：读得到主相机索引就让舞台相机用同一个；读不到（反射失败 / 索引 < 0 即「用默认」）不改，只靠下面的类型比较兜底。
+                int mainRendererIndex = ReadRendererIndex(mainData);
+                if (mainRendererIndex >= 0)
+                {
+                    state.StageRendererIndex = ReadRendererIndex(stageData);
+                    state.RendererChanged = true;
+                    stageData.SetRenderer(mainRendererIndex);
+                }
+                rendererMismatch = !SameRendererType(mainData, stageData);
+            }
+            if (canStack && !rendererMismatch)
             {
                 stageData.renderType = CameraRenderType.Overlay;
                 // cameraStack 在渲染器不支持叠加时返回 null（URP 自己会记一条 Warning）。
@@ -432,7 +459,12 @@ namespace Game.Performance
                     if (!stack.Contains(stageCamera)) stack.Add(stageCamera);
                     state.MainData = mainData;
                     state.Stacked = true;
-                    return;
+                    // 叠加后再核一次：类型仍不一致时 URP 会每帧跳过整段渲染，撤出相机栈走退路。
+                    if (SameRendererType(mainData, stageData)) return;
+                    stack.Remove(stageCamera);
+                    state.MainData = null;
+                    state.Stacked = false;
+                    rendererMismatch = true;
                 }
             }
 
@@ -445,6 +477,7 @@ namespace Game.Performance
                 : main == stageCamera ? "stage_is_main"
                 : mainData == null ? "no_urp_data"
                 : mainData.renderType != CameraRenderType.Base ? "main_not_base"
+                : rendererMismatch ? "renderer_mismatch"
                 : "stack_unsupported";
             Log.Warn($"PerformanceService：演出 {id} 无法叠加到主相机（{reason}），舞台相机改为 Base 独立渲染。", stage);
             telemetry.TrackWarn("camera_stack_unavailable", TelemetryProps.Of(("id", id), ("reason", reason)));
@@ -460,7 +493,11 @@ namespace Game.Performance
             // 舞台相机随实例归还一起销毁，这里仍改回原值：实例若被复用 / 归还失败，也不留下被改过的相机。
             if (state.Stage != null)
             {
-                if (state.StageData != null) state.StageData.renderType = state.StageRenderType;
+                if (state.StageData != null)
+                {
+                    state.StageData.renderType = state.StageRenderType;
+                    if (state.RendererChanged) state.StageData.SetRenderer(state.StageRendererIndex);
+                }
                 if (state.Fallback)
                 {
                     state.Stage.depth = state.StageDepth;
@@ -469,6 +506,21 @@ namespace Game.Performance
                 }
             }
             state = default;
+        }
+
+        /// <summary>反射读相机当前渲染器索引；字段取不到（URP 升级改名）返回 -1，调用方退回类型比较。</summary>
+        private static int ReadRendererIndex(UniversalAdditionalCameraData data)
+        {
+            if (RendererIndexField == null || data == null) return -1;
+            return RendererIndexField.GetValue(data) is int index ? index : -1;
+        }
+
+        /// <summary>两台相机实际生效的渲染器是否同一类型（Renderer2D / UniversalRenderer）；任一取不到按不一致处理。</summary>
+        private static bool SameRendererType(UniversalAdditionalCameraData main, UniversalAdditionalCameraData stage)
+        {
+            ScriptableRenderer mainRenderer = main.scriptableRenderer;
+            ScriptableRenderer stageRenderer = stage.scriptableRenderer;
+            return mainRenderer != null && stageRenderer != null && mainRenderer.GetType() == stageRenderer.GetType();
         }
     }
 }
