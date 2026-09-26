@@ -22,7 +22,7 @@ namespace Game.Performance
         [SerializeField] private float fadeSeconds = 0.25f;
 
         [Tooltip("时间轴停在「等待输入」标记上时显示的提示符。")]
-        [SerializeField] private string holdPromptText = "▼";
+        [SerializeField] private string holdPromptText = "▼ 点击或按空格继续";
 
         [Tooltip("跳过提示的格式串，{0} 会替换成跳过键的键位名（取不到时替换成「跳过」）。")]
         [SerializeField] private string skipHintFormat = "按住 {0} 跳过";

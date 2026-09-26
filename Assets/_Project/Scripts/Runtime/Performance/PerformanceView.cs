@@ -1,7 +1,7 @@
 // 职责：演出面板——上下黑边、字幕（说话者 + 正文）、停顿提示符、跳过提示与长按进度环、进场黑场淡出；
 //   实现字幕输出端供时间轴字幕轨道调用。只显示，不注入服务、不读输入、不持有播放进度，全部由 PerformanceService 调方法。
 // 为什么新建（复用 → 扩展 → 新建）：DialogueView 是对白主面板（Popup 层、带选项与控件），演出要的是 Panel 层全屏、
-//   Esc 关不掉、没有交互控件的覆盖层；塞进 DialogueView 会让 Performance 依赖 Dialogue（方向禁止）。
+//   Esc 关不掉、只有一块全屏透明点击区（停顿时点击继续）的覆盖层；塞进 DialogueView 会让 Performance 依赖 Dialogue（方向禁止）。
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -12,6 +12,7 @@ using LitMotion;
 using LitMotion.Extensions;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace Game.Performance
@@ -20,7 +21,8 @@ namespace Game.Performance
     /// 演出面板。预制体 Addressables 地址须为 <c>PerformanceView</c>（UI 组）。
     /// <para>
     /// 接线提示：<c>letterboxTop</c> / <c>letterboxBottom</c> 分别锚在屏幕上 / 下边缘、横向拉伸，高度由本类改 sizeDelta.y；
-    /// <c>fade</c> 是全屏黑色 Image（不挡射线）；<c>skipFill</c> 的 Image Type 须为 Filled。
+    /// <c>fade</c> 是全屏黑色 Image（不挡射线）；<c>skipFill</c> 的 Image Type 须为 Filled；
+    /// <c>tapArea</c> 是全屏透明 Button，放在层级最后（最上层），其余 Graphic 一律关 raycastTarget。
     /// </para>
     /// </summary>
     public sealed class PerformanceView : UIView, IPerformanceSubtitleSink
@@ -55,6 +57,9 @@ namespace Game.Performance
         [Tooltip("长按进度环（Image Type = Filled）；进度为 0 时隐藏。")]
         [SerializeField] private Image skipFill;
 
+        [Tooltip("全屏透明点击区：停顿时点击等价确认键")]
+        [SerializeField] private Button tapArea;
+
         private MotionHandle topHandle;
         private MotionHandle bottomHandle;
         private MotionHandle fadeHandle;
@@ -67,11 +72,21 @@ namespace Game.Performance
         /// <summary>演出本身会整层藏 HUD；面板在 Panel 层，这里为 true 只是声明「沉浸模式下也要显示」。</summary>
         public override bool VisibleWhenHudHidden => true;
 
+        /// <summary>全屏点击区被点。服务按「确认」处理：只在停顿时生效，不触发跳过。</summary>
+        public event Action OnTap;
+
         public override UniTask OnOpenAsync(object arg, CancellationToken ct)
         {
             Validate();
             if (!(arg is PerformanceViewArgs args))
                 throw new ArgumentException("PerformanceView 需要 PerformanceViewArgs 参数", nameof(arg));
+
+            tapArea.onClick.RemoveListener(HandleTap);
+            tapArea.onClick.AddListener(HandleTap);
+            // 全屏透明点击区不参与手柄 / 方向键导航，免得选中落到看不见的按钮上。
+            Navigation none = tapArea.navigation;
+            none.mode = Navigation.Mode.None;
+            tapArea.navigation = none;
 
             CancelMotions();
             HideSubtitle();
@@ -128,11 +143,19 @@ namespace Game.Performance
         public override UniTask OnCloseAsync(CancellationToken ct)
         {
             // 淡出过渡已播完才走到这里：收黑边、清字幕，让下次打开从干净状态开始。
+            if (tapArea != null) tapArea.onClick.RemoveListener(HandleTap);
+            OnTap = null;
             CancelMotions();
             if (letterboxTop != null && letterboxBottom != null) SetLetterbox(0f);
             if (subtitleRoot != null) HideSubtitle();
             if (holdPrompt != null) holdPrompt.gameObject.SetActive(false);
             return UniTask.CompletedTask;
+        }
+
+        private void OnDisable()
+        {
+            // 面板被直接销毁 / 停用时也退订，与 OnOpenAsync 的订阅成对。
+            if (tapArea != null) tapArea.onClick.RemoveListener(HandleTap);
         }
 
         /// <summary>显示一句字幕；说话者为空时隐藏名字栏（旁白）。</summary>
@@ -186,6 +209,15 @@ namespace Game.Performance
             fade.color = color;
         }
 
+        // 点完即取消选中：否则 EventSystem 留着选中态，之后按 Enter / 手柄 A 会被 UI Submit 再点一次。
+        private void HandleTap()
+        {
+            EventSystem eventSystem = EventSystem.current;
+            if (eventSystem != null && eventSystem.currentSelectedGameObject == tapArea.gameObject)
+                eventSystem.SetSelectedGameObject(null);
+            OnTap?.Invoke();
+        }
+
         private void CancelMotions()
         {
             if (topHandle.IsActive()) topHandle.Cancel();
@@ -207,6 +239,7 @@ namespace Game.Performance
             if (skipRoot == null) missing.Add(nameof(skipRoot));
             if (skipLabel == null) missing.Add(nameof(skipLabel));
             if (skipFill == null) missing.Add(nameof(skipFill));
+            if (tapArea == null) missing.Add(nameof(tapArea));
             if (missing.Count > 0)
                 throw new InvalidOperationException("PerformanceView 引用未接线：" + string.Join("、", missing));
         }

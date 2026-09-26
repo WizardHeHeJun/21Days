@@ -43,7 +43,7 @@ Live2D 适配层：SDK 不在时整个程序集不参与编译，在时表情走
 | `PerformanceStage` | 预制体根组件：持 `PlayableDirector` 与舞台相机；`Play/Resume/Stop`；收 `HoldMarker` 通知 → 暂停并 `OnHold`；`director.stopped` → `OnFinished`（`PerformanceStage.cs:19`） | 演出预制体根；服务播放时调用 |
 | `PerformanceActor` | 抽象基类：`ExpressionNames`（校验用）、`SetExpression`、`SetVisible`、`GatherPreviewProperties`（编辑器预览属性登记） | 表情轨道绑定它 |
 | `SpritePerformanceActor` | 占位演员：`SpriteRenderer` + 「表情名 → Sprite」列表 | 模板工厂默认建的演员 |
-| `PerformanceView` | `UIView`（**Panel 层全屏**，`CloseOnCancel = false`），实现 `IPerformanceSubtitleSink`：黑边 / 字幕 / ▼ / 跳过进度环 / 黑场，全 LitMotion unscaled（`PerformanceView.cs:26`） | `IUIService` 按地址 `PerformanceView` 实例化 |
+| `PerformanceView` | `UIView`（**Panel 层全屏**，`CloseOnCancel = false`），实现 `IPerformanceSubtitleSink`：黑边 / 字幕 / ▼ / 跳过进度环 / 黑场，全 LitMotion unscaled；全屏透明 `tapArea` 被点抛 `OnTap`（`PerformanceView.cs:28`） | `IUIService` 按地址 `PerformanceView` 实例化；服务订阅 `OnTap` 转 `Confirm()` |
 | `PerformanceViewArgs` | 打开面板的参数快照（策略、跳过提示文案、黑边高度、黑场时长、停顿提示符） | 服务组装后传给 `ui.OpenAsync<PerformanceView>` |
 | `PerformanceTrigger` | 场景挂载点：`performanceId`（`[PerformanceId]`）、`mode`（`OnEnter`/`OnSceneStart`）、`once`；`OnTriggerEnter(2D)` 只认带 `PerformanceTriggerActor` 的对象（`PerformanceTrigger.cs:17`） | 场景物体；服务由 `PerformanceSceneBinder` 注入 |
 | `PerformanceTriggerActor` | 空标记，挂玩家根（同 `DialogueInteractionActor` 的做法，但不依赖 Dialogue） | 场景玩家物体 |
@@ -80,7 +80,7 @@ PerformanceService.PlayAsync(id, ct)：
   每帧（unscaled）：
     finishedPending（时间轴自然停）→ rules.Complete()，跳出循环
     pendingSkip（代码 Skip()）→ rules.Skip() → 停时间轴、清进度环
-    confirmRequested（Dialogue/Advance 按下 或 代码 Confirm()）且 Holding → rules.Confirm() → 收 ▼、Resume()
+    confirmRequested（Dialogue/Advance 按下 或 代码 Confirm() 或 面板 TapArea 点击 → OnTap → Confirm()）且 Holding → rules.Confirm() → 收 ▼、Resume()
     holdPending（收到 HoldMarker 通知）→ rules.EnterHold() → 显示 ▼
     policy.Skippable → rules.TickSkip(Dialogue/Skip 按住, dt) → view.SetSkipProgress；满 → 结束
   直到 rules.Phase == Finished
@@ -101,6 +101,12 @@ PerformanceService.PlayAsync(id, ct)：
   → 服务缺席记 Warn + 埋 dialogue 模块的 performance_unavailable；演出抛非取消异常记 Error + 埋 performance_failed，都不阻断对白
   → 完成后 Performing = false，比对 Generation/Visit 后继续 PrepareAsync 摆台词
 ```
+
+## 玩家操作
+
+- **继续**（停顿 ▼ 时）：鼠标点击画面任意处（`PerformanceView.tapArea`）/ 空格 / 回车 / 小键盘回车 / 手柄 A（South），即 Dialogue 图 `Advance`；点击经 `OnTap` → `Confirm()`，非停顿期间点击无效果、不触发跳过。
+- **跳过**：长按左 / 右 Ctrl 或手柄 RB（Dialogue 图 `Skip`）满 `SkipHoldSeconds`。
+- 停顿提示文案取 `PerformanceConfig.holdPromptText`（默认「▼ 点击或按空格继续」），面板原样显示。
 
 ## 依赖方向
 
@@ -175,7 +181,7 @@ Performance 不认识任何对白名词，输入图常量 `"Dialogue"` 写死在
 | 项 | 要求 | 缺了会怎样 |
 | --- | --- | --- |
 | Installer | `Boot.unity` 的 `GameBootstrap` 挂 `PerformanceInstaller`，排在 `DialogueInstaller` 之后；**Config** 拖 `Data/Performance/PerformanceConfig.asset` | 没挂：解析不到 `IPerformanceService`（对白插播记 Warn 跳过）；没拖：记 Error 用默认值顶上 |
-| 面板地址 | Addressables UI 组 `PerformanceView` → `Prefabs/UI/PerformanceView.prefab`，10 个字段全接（`letterboxTop`/`letterboxBottom`/`fade`/`subtitleRoot`/`speaker`/`body`/`holdPrompt`/`skipRoot`/`skipLabel`/`skipFill`，`skipFill` 的 Image Type 须为 Filled） | `ui.OpenAsync<PerformanceView>()` 找不到预制体；漏接字段 `Validate()` 逐个点名抛出 |
+| 面板地址 | Addressables UI 组 `PerformanceView` → `Prefabs/UI/PerformanceView.prefab`，11 个字段全接（`letterboxTop`/`letterboxBottom`/`fade`/`subtitleRoot`/`speaker`/`body`/`holdPrompt`/`skipRoot`/`skipLabel`/`skipFill`/`tapArea`，`skipFill` 的 Image Type 须为 Filled；`tapArea` 是层级最后的全屏透明 Button，其余 Graphic 关 `raycastTarget`） | `ui.OpenAsync<PerformanceView>()` 找不到预制体；漏接字段 `Validate()` 逐个点名抛出 |
 | 演出资产 | Addressables **Performance** 组：地址 = 预制体名 = 演出 id；预制体 `Prefabs/Performance/<id>.prefab`；时间轴 `Data/Performance/Timelines/<id>.playable`；两者由 `PerformanceTemplateFactory` 一步建齐 | 地址查不到：`InstantiateAsync` 抛出，埋 `load_failed` |
 | 图层 | `Performance`（第 9 槽，`TagManager.asset`）；主相机剔除遮罩要**排除**它 | 层不存在：舞台相机剔不到任何东西，画面全黑；主相机没排除：场景内容被舞台相机重叠渲染 |
 | 玩家标记 | 玩家根挂 `PerformanceTriggerActor`（一个场景一个） | 场景触发器 `OnTriggerEnter(2D)` 永远不认玩家，不会触发 |

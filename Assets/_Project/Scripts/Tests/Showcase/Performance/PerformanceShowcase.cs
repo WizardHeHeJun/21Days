@@ -1,6 +1,6 @@
 // 职责：Performance 模块回放——代码按 id 拉起演出（黑边、字幕、世界时停、停顿确认、结束恢复）、长按跳过提前结束、
 //   场景触发区进入即播且只播一次、对白节点前插播演出（PRD 验收 A2–A5）。
-// 确认 / 跳过一律走 IPerformanceService.Confirm() / Skip()（等价玩家按确认 / 长按满），不读输入、不碰规则与舞台。
+// 确认 / 跳过一律走 IPerformanceService.Confirm() / Skip()（等价玩家按确认 / 长按满），用例 1 的第一次确认点面板 TapArea；不读输入、不碰规则与舞台。
 using System;
 using System.Collections;
 using Cysharp.Threading.Tasks;
@@ -99,7 +99,10 @@ namespace Game.Tests.Showcase.Performance
                 () => rules != null && rules.Phase == PerformancePhase.Holding && HoldPromptVisible(), 10f);
             yield return Snapshot("等待确认");
 
-            yield return Step("确认继续（等价玩家按确认键）", () => performance.Confirm());
+            // 第一次确认走面板全屏点击区，证明「点击 = 确认」链路；后续停顿仍用 Confirm()。
+            yield return Step("点击画面继续（点演出面板的 TapArea）", () => RequireButton("TapArea").onClick.Invoke());
+            yield return Check("点击后停顿解除：「▼」收起，时间轴继续",
+                () => rules != null && rules.Phase != PerformancePhase.Holding && !HoldPromptVisible(), 3f);
             yield return DriveUntilEnded(15f);
             yield return Check("演出正常播完：结果 Completed，已记为播过",
                 () => !performance.IsRunning && hasResult && lastResult.Outcome == PerformanceOutcome.Completed
@@ -379,6 +382,19 @@ namespace Game.Tests.Showcase.Performance
 
             Transform child = root.transform.Find(childName);
             return child != null && child.gameObject.activeInHierarchy;
+        }
+
+        private Button RequireButton(string objectName)
+        {
+            PerformanceView view = View();
+            Transform child = view == null ? null : view.transform.Find(objectName);
+            Button button = child == null ? null : child.GetComponent<Button>();
+            if (button == null)
+            {
+                throw new InvalidOperationException($"演出面板下找不到按钮「{objectName}」（面板没开，或预制体物体名不一致）");
+            }
+
+            return button;
         }
 
         private void TapDialogue()

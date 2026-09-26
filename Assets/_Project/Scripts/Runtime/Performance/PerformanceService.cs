@@ -208,6 +208,8 @@ namespace Game.Performance
             bool finishedPending = false;
             Action onHold = () => holdPending = true;
             Action onFinished = () => finishedPending = true;
+            // 面板点击直接走 Confirm()：只在 Holding 时置确认请求，循环里经 HandleConfirm 继续；非停顿期间点击无事，不触发跳过。
+            Action onTap = Confirm;
             bool subscribed = false;
             try
             {
@@ -221,6 +223,7 @@ namespace Game.Performance
                 var args = new PerformanceViewArgs(policy, BuildSkipHint(actions), config.LetterboxHeight,
                     config.FadeSeconds, config.HoldPromptText);
                 view = await ui.OpenAsync<PerformanceView>(args, ct);
+                view.OnTap += onTap;
                 if (policy.HideHud)
                 {
                     // 隐藏 HUD 层与弹窗层：对白框（DialogueView）在弹窗层，Panel 层的演出面板盖不住它，对白里插播时要一起藏。
@@ -305,7 +308,11 @@ namespace Game.Performance
                     stage.Stop();
                 }
                 DetachCamera(ref camera);
-                if (view != null) await CloseViewAsync(view, id);
+                if (view != null)
+                {
+                    view.OnTap -= onTap;
+                    await CloseViewAsync(view, id);
+                }
                 pendingConfirm = false;
                 pendingSkip = false;
                 if (hudHidden)
