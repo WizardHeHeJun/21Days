@@ -31,7 +31,7 @@ IsometricExploration 是 `SampleScene` 中的 2.5D / 3D 混合原型。
 | `IsometricExplorationConfig` | `Assets/_Project/Scripts/Runtime/IsometricExploration/IsometricExplorationConfig.cs:8` | 保存移动速度、排序兼容参数和相机缓动时间 |
 | `IsometricPlayerController3D` | `Assets/_Project/Scripts/Tests/Showcase/IsometricExploration/IsometricPlayerController3D.cs:10` | 把 `Gameplay/Move` 输入应用到 3D `Rigidbody` |
 | `ExplorationInstaller` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationInstaller.cs:20` | 本模块的 GameplayInstaller：注册 `ExplorationHudPresenter` / `ExplorationControlsPresenter` / `ExplorationCompassPresenter` 三个入口点与 `IsometricExplorationConfig` |
-| `ExplorationHudView` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationHudView.cs:21` | 探索常驻 Hud：左下角「沉浸」切换按钮 + 走跑 / 摇杆 / 触屏三键 / 重置 / 交互提示 / 万向标（全部可空容错），`VisibleWhenHudHidden = true` |
+| `ExplorationHudView` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationHudView.cs:21` | 探索常驻 Hud：右上角「沉浸」切换按钮 + 走跑 / 摇杆 / 触屏三键 / 重置 / 交互提示 / 万向标（全部可空容错），`VisibleWhenHudHidden = true` |
 | `ExplorationHudPresenter` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationHudPresenter.cs:23` | 启动后打开探索 HUD，驱动沉浸模式的进入 / 退出与埋点 `immersive_changed` |
 | `ExplorationControlsPresenter` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationControlsPresenter.cs:30` | 入口点：摇杆 / 触屏三键按平台显隐、走跑标签跟随 `PlayerModel.IsRunning`、物资箱焦点提示、沉浸时整体隐藏控件区、驱动「重置进度」确认流程 |
 | `ExplorationCompassPresenter` | `Assets/_Project/Scripts/Runtime/IsometricExploration/ExplorationCompassPresenter.cs:29` | 入口点：场景加载时登记 `ExplorationPointOfInterest`，每帧把屏外兴趣点摆到画布边缘（对象池复用模板），沉浸时整体跳过 |
@@ -200,12 +200,12 @@ player（根节点，脚底，缩放 (1, 1, 1)，y = 4.8884）
 
 ```text
 ExplorationHudView（RectTransform 铺满，CanvasGroup，ExplorationHudView）
-├─ ImmersiveButton（左下角锚点；Image + Button + CanvasGroup）
+├─ ImmersiveButton（右上角锚点；Image + Button + CanvasGroup，不在 ControlsRoot 下，沉浸中仍显示）
 │  └─ Label（TextMeshProUGUI「沉浸」/「退出沉浸」）
 ├─ ControlsRoot（CanvasGroup = controlsGroup，沉浸时整体隐藏）
 │  ├─ Stick（左下，OnScreenStick 绑 `<Gamepad>/leftStick`）── Knob
 │  ├─ TouchButtons（潜行 SneakButton / 伪装 DisguiseButton / 攻击 AttackButton，各自 OnScreenButton）
-│  ├─ ResetButton（左上，任务栏下方）
+│  ├─ ResetButton（右上，沉浸按钮下方）
 │  └─ InteractPrompt（屏幕下方居中 TMP，anchoredPosition (0, 72)、sizeDelta 320×48，与对白模块的交互提示
 │     `DialogueInteractHudView` 同位；两者由 `SupplyCrateFocus` / `DialogueInteractionFocus` 的让位规则互斥，不会同时出现）
 ├─ RunSlot（右下角锚点，独立 CanvasGroup = runToggleGroup，不在 ControlsRoot 下）
@@ -225,9 +225,14 @@ ExplorationHudView（RectTransform 铺满，CanvasGroup，ExplorationHudView）
   订阅 `Game.Loot.SupplyCrateFocus.OnFocusChanged` 显隐交互提示（文案取 `LootConfig.PromptText`）；
   沉浸时 `HudVisibilityChangedEvent` 驱动 `hud.SetControlsVisible(false)`，同时切 `ControlsRoot` 与
   `RunToggle` 两个 CanvasGroup。
-- **重置进度**（波 8 挪到左下角，2026-09-26）：`ResetButton` 锚点改为左下角（同 `ImmersiveButton`
-  的 anchorMin/Max/pivot 均为 (0,0)），`anchoredPosition (48, 136)`、`sizeDelta 220×56`，正好压在
-  `ImmersiveButton` 上方，与左上角任务栏 `QuestHudView` 不再叠在一起。点 `ResetButton` → `OpenAsync<ExplorationConfirmView>(config.ResetMessage)` →
+- **重置进度**（波 12 挪到右上角，2026-09-26）：`ImmersiveButton` 与 `ResetButton` 均改锚点/pivot
+  为右上角 (1,1)：`ImmersiveButton` `anchoredPosition (-48, -160)`、`sizeDelta 220×72`；`ResetButton`
+  `anchoredPosition (-48, -240)`、`sizeDelta 220×56`，紧贴 `ImmersiveButton` 下方（占 x −268..−48、
+  y −160..−296）。挪到右上角是为了不再压左上角任务栏 `QuestHudView`（波 8 的左下角方案会与
+  `EncounterSceneView` 的调试按钮/文字叠在一起，波 12 改为两边各占一角）；同时与
+  `DialogueView.prefab` 的 `Controls`（右上锚点 (−40,−40)、392×36，倍速/自动/跳过三键）和
+  `PortraitRight`（右上锚点 (−40,0)、200×200，pivot (1,0.5)）留出间隔：对话三键占 y −40..−76，
+  右立绘到 y −100，与本组的 y −160..−296 之间有 60 像素以上的空隙，不会互相遮挡。点 `ResetButton` → `OpenAsync<ExplorationConfirmView>(config.ResetMessage)` →
   `WaitAsync` 等选择 → 关闭弹窗 → 确认则 `QuestService.ResetProgress()` → `LootService.Reset()` →
   `IGameFlow.GoToAsync<MonsterEncounterState>()`（退出当前遭遇状态卸载场景，重新加载后玩家回出生点，
   箱子随 `LootResetEvent` 合上）；取消 / 弹窗被关掉都按「取消」处理，不抛异常。埋点

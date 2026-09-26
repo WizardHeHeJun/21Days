@@ -120,3 +120,124 @@
 
 - [x] T30 `IsometricExplorationConfig` 新增 `[SerializeField] bool showCompass = false` + 只读属性 `ShowCompass`；`IsometricExplorationConfig.asset` 经 `manage_scriptable_object` 显式写 `showCompass: false`。`ExplorationCompassPresenter` 新增读写属性 `Enabled`（构造时取 `config.ShowCompass`），`Tick` 在 `!Enabled` 时跳过扫描 / 摆位（只在关闭当帧收起已显示标记）；`ExplorationInstaller` 给万向标那条 `RegisterEntryPoint` 追加 `.AsSelf()`，回放按具体类型解析。`ExplorationShowcase.Compass_ShowsOffscreenPoiAndHidesWhenImmersive` 开头加检查点「默认关闭：出生点没有激活万向标克隆」，随后 `Step` 显式 `ResolveService<ExplorationCompassPresenter>().Enabled = true` 打开再走原有断言；排查确认其余用例（`Crate_*`、`Reset_*`、`Collision_*`、`MultiLevel_*`、`Occluder_*`）都不依赖万向标激活状态，未改动。
   - 证据：4 个 `.cs`（`IsometricExplorationConfig`、`ExplorationCompassPresenter`、`ExplorationInstaller`、`ExplorationShowcase`）lint 退出码均 0；`refresh_unity(compile=request)` 后 `read_console(error)` 0 条（此后另一并发会话改 `Core/Boot/GameLifetimeScope.cs` 引入 `CS0246 TitleLoadClickedEvent` 未定义，与本波无关，不在本波允许改动的文件范围内，未处理）；EditMode 645/645；PlayMode `ExplorationShowcase` 全部 8 条（`Controls_RunToggleViaKeyAndTouchControlsHiddenOnDesktop`、`Compass_ShowsOffscreenPoiAndHidesWhenImmersive`、`Crate_CollectGivesRewardAndQuestProgress`、`Reset_RestoresQuestsAndCrates`、`Collision_FenceBlocksPlayer`、`MultiLevel_RampLeadsToDeck`、`Occluder_FadesBridgeWhenPlayerBeneath`、`Occluder_FadesTowerWhenPlayerOnStairs`）PASS（job `0628f58b32254a54a2cd2eb831ef6d3b`，8/8，54.3s）。`isometricexploration-module-guide.md`、`prp.md` 3.2 已同步默认关闭说明。
+
+## 波 12（sonnet）——HUD 布局修正：沉浸/重置挪右上角 + EncounterSceneView 调试块挪左下角（2026-09-26）
+
+用户反馈：左上角任务栏 `QuestHudView` 与探索 HUD 的「重置进度」按钮叠在一起；要求「沉浸」挪右上角，
+且不能挡住对话过程中的三个按钮（`DialogueView.prefab` 的 `Controls`）。波 8 曾报告已把 `ResetButton`
+改到左下角，但用户截图显示仍在旧位置——复核发现那次用 MCP 预制体舞台改动没有真正落盘，本波改用
+`execute_code` 的 `PrefabUtility.LoadPrefabContents`/`SaveAsPrefabAsset` 直接改资产文件，避免重蹈覆辙。
+
+- [x] T31 `ExplorationHudView.prefab`：`ImmersiveButton`（不在 `ControlsRoot` 下，沉浸中仍显示）与
+  `ControlsRoot/ResetButton` 锚点/pivot 均改右上 (1,1)；`ImmersiveButton` `anchoredPosition (-48,-160)`
+  `sizeDelta 220×72`，`ResetButton` `anchoredPosition (-48,-240)` `sizeDelta 220×56`，占 x −268..−48、
+  y −160..−296，避开左上角任务栏与 `DialogueView.prefab` 的 `Controls`（y −40..−76）/`PortraitRight`
+  （到 y −100）。
+  - 证据：不用预制体舞台，改走 `execute_code`：`PrefabUtility.LoadPrefabContents` → 直接改
+    `RectTransform` 五个字段 → `PrefabUtility.SaveAsPrefabAsset` → `UnloadPrefabContents` →
+    `AssetDatabase.SaveAssets()`；Bash 读磁盘 YAML 复核两个物体的 `m_AnchorMin/Max/Pivot/
+    AnchoredPosition/SizeDelta` 与目标值一致；`git diff --stat` 显示该预制体 `1 file changed,
+    9 insertions(+), 9 deletions(-)`；`refresh_unity` 后重读一遍 YAML，数值未被回滚。
+- [x] T32 `EncounterSceneView.OnGUI` 调试块（返回标题按钮 + 两行状态 + 警戒条）从右上角挪到左下角
+  像素坐标（不随画布缩放）：按钮 `Rect(16, Screen.height − 56, 114, 40)`，两行文字 y = `Screen.height
+  − 56 − 28 − 28` 与 `− 56 − 28`，警戒条 y = `Screen.height − 56 − 28 − 28 − 24`；新增
+  `Time.timeScale <= 0f` 时整块不画（对白 / 面板暂停期间不压对话框）；删未再使用的
+  `rightAlignedLabel` 字段与其 `GUIStyle`。
+  - 证据：lint 退出码 0；`refresh_unity(compile=request)` 后 `read_console(error)` 当时 0 条；
+    EditMode 675/675。
+- [x] T33 文档：`isometricexploration-module-guide.md`（HUD ASCII 图 `ImmersiveButton`/`ResetButton`
+  改右上角、总览表格沉浸按钮描述、探索控件与万向标小节的重置进度位置与避让说明）、
+  `monster-module-guide.md`（`EncounterSceneView` 调试块位置改左下角、暂停不画）、`pitfalls.md`
+  追加「MCP 预制体舞台改动可能不落盘」一条。
+- [ ] T34 PlayMode 回放验证（`ExplorationShowcase` 8 条 + `IsometricExplorationShowcase` 2 条）
+  **本波未跑通，非本波代码问题**：另一并发会话对 `Assets/_Project/Scripts/Runtime/Quest/
+  QuestInstaller.cs` 的在制改动引入 `CS7036`（`QuestService` 构造函数缺 `telemetry` 实参），项目
+  全局编译失败，PlayMode 域重载起不来；三次 `run_tests(PlayMode, init_timeout=120000)` 均在 120s
+  超时判失败（Console：`TestJobManager` 报 "failed to initialize"）。`QuestInstaller.cs` 不在本波
+  允许修改的文件范围内，未处理。EditMode 675/675 是在该编译错误出现**之前**跑的，当时编译干净；
+  T31/T32 的改动本身经 lint + 当时编译验证过，只是缺最后一步 PlayMode 回放证据。
+  - 待办：Quest 那边编译修好后，重跑上述 10 条用例并截一张能看到右上角 `ImmersiveButton`/
+    `ResetButton` 的回放截图。
+
+## 只能人做的
+
+- 视觉验收：本波未能生成新的回放截图（PlayMode 被外部编译错误阻塞，见 T34）；Quest 编译修好后
+  重跑回放，确认右上角两按钮不挡对话三键，再截图交开发者过目；`/review-change` 授权后按文件提交
+  （只提交本波允许改动的文件，不带别人未修好的 `QuestInstaller.cs`）。
+
+## 波 13（sonnet）——存档槽隔离导致回放超时（2026-09-26）
+
+背景：标题「开始」已接入存档会话（`SessionTitleRouter` → `GameSession.NewGameAsync` →
+`MonsterEncounterState`），进场景会真写 `<SaveRoot>/slot{N}.json`；`SessionConfig.slotCount = 3`。
+`ExplorationShowcase` 8 条用例每条都点一次「开始」，3 个槽写满后第 4 条起 `SessionTitleRules.
+PickNewGameSlot` 找不到空槽，路由改成弹选槽面板而不是直接进场景，回放卡在 `EnterExploration()`
+的「等进入探索场景」超时（`Logs/verify/exploration/20260926-134529/report.md` 前 3 条 PASS、后 5 条超时）。
+
+- [x] T35 起初按需求在 `ExplorationShowcase` 自行实现 `IsolateSaveSlots`/`RestoreSaveSlots`（点「开始」
+  前把 `IPlatformService.SaveRoot` 下 `slot*.json`/`.tmp`/`.bak`/`profile-*.json` 移到
+  `Application.temporaryCachePath` 备份，`TearDown` 里 try/finally 还原）；lint 通过后编译时发现
+  另一并发会话（存档/Session 那边）已经把根治方案直接落进框架：`PlatformServiceBase.
+  SaveRootOverride`（静态覆盖）+ `ShowcaseScenario.ShowcaseSetUp/TearDown` 在加载 Boot **之前**把
+  `SaveRoot` 重定向到 `Application.temporaryCachePath/showcase-saves/<模块>-<用例名>`、收尾统一清理，
+  `.claude/rules/module-verify.md` 也同步加了硬规则「不要自己碰 `SaveRoot` 或自行备份/还原槽文件」。
+  于是把自建的隔离代码整段撤回，`ExplorationShowcase.cs` 现在与仓库基线完全一致（`git diff` 为空），
+  不重复造轮子。
+  - 证据：`git diff -- Assets/_Project/Scripts/Tests/Showcase/Exploration/ExplorationShowcase.cs`
+    输出为空（撤回彻底）；`ai-docs/pitfalls.md` 「从『开始』进场景的回放把玩家真实存档写满了」一条
+    已完整记录框架侧根治方案，不再重复记录本波一度写过又撤回的自建方案（仅保留一条指向该条目的
+    历史注记）。
+- [x] T36 编译与回放复核：`refresh_unity(compile=request)` 后 `read_console(error)` 0 条；
+  `run_tests(PlayMode)` 8 条 Exploration 用例全部**跑完**（不再卡超时）：`Controls_
+  RunToggleViaKeyAndTouchControlsHiddenOnDesktop`、`Compass_ShowsOffscreenPoiAndHidesWhenImmersive`、
+  `Reset_RestoresQuestsAndCrates`、`Collision_FenceBlocksPlayer`、`MultiLevel_RampLeadsToDeck`、
+  `Occluder_FadesBridgeWhenPlayerBeneath`、`Occluder_FadesTowerWhenPlayerOnStairs` 共 7 条 PASS；
+  `Crate_CollectGivesRewardAndQuestProgress` 1 条 FAIL——失败点是开箱通知正文「破旧信笺 ×1」与
+  `ExpectedRewardBody` 现读 `tbitem`/`Crate_A.ItemId` 算出的期望值不一致，与本波的存档隔离改动无关
+  （`git status` 显示 `Tables/Data/__beans__.xlsx`、`Assets/_Project/Scripts/Core/Config/Generated/
+  Item.cs`、`tbitem.bytes` 当前均为并发会话在制修改，不在本波允许改动的文件范围内，未处理）。
+  报告 `Logs/verify/exploration/20260926-135719/report.md`；截图含
+  `05-控件初始·散步.png`（右上角可见「沉浸」「重置进度」按钮）。
+  - 隔离效果核验：跑前 `ls -l` 记录真实存档目录（`%LOCALAPPDATA%Low/DefaultCompany/project1/saves/`，
+    即 `IPlatformService.SaveRoot` 的正式包路径）（`slot1..3.json`/`.bak`、
+    `profile-dialogue-read.json`/`.bak`、`Replays/`），
+    跑后同一目录逐文件大小与 mtime 完全一致——8 条用例全程没有碰到玩家真实存档，证明框架的
+    `SaveRootOverride` 重定向确实生效。
+- [x] T37 `ai-docs/pitfalls.md` 末尾追加「走 Boot 的回放会写玩家真实存档槽」条目并在编写过程中随框架
+  落地同步改成「已根治」指向框架条目（详见 T35 证据）。
+
+## 只能人做的（波 13 新增）
+
+- `Crate_CollectGivesRewardAndQuestProgress` 的开箱通知正文断言失败，等并发会话把 `tbitem`/
+  `Crate_A.ItemId` 的改动稳定下来后重跑这一条单独复核；不影响本波「存档槽隔离」这个目标本身
+  （其余 7 条已证明回放不再受真实存档槽数量限制）。
+
+## 波 14（sonnet）——查实：不是数据问题，是通知队列时序（2026-09-26）
+
+复核波 13 T36 遗留的 `Crate_CollectGivesRewardAndQuestProgress` FAIL（报告仍是
+`Logs/verify/exploration/20260926-135719/report.md`）：tbitem 1005 名字确实是「破旧信笺」，
+`ExpectedRewardBody` 算出的期望正文与实际一致，**不是数据问题**。翻报告第 12 检查点的截图
+`09-开箱·获得物资.png`——t=9.4s 时顶部通知显示的是「已保存」，不是「获得物资」，说明「获得物资」
+已经显示完并翻篇了；查 `NotificationService`/`NotificationQueue`（单队列，只按 FIFO 出队，仅同标题
+合并）+ `QuestNotificationPresenter`（进场景可能弹「接取任务」类通知）+ `SaveTriggerBridge` →
+`GameSession.SaveNowAsync`（进场景、开箱各触发一次自动保存，成功弹「已保存」，`SessionConfig.
+SaveNoticeSeconds = 1f`）：确认「获得物资」和其它模块的通知走同一个 `INotificationService` 队列，
+不同标题只排队不合并，开箱那一刻前面可能已经排了「接取任务」「已保存」等通知，原检查点固定 3 秒
+超时等不到它轮到。
+
+- [x] T38 `ExplorationShowcase.Crate_CollectGivesRewardAndQuestProgress` 检查点 12（原顶部通知断言）
+  改成「在最多 N 秒内曾经显示过」：新增常量 `MaxNotificationsAheadOfReward = 3`（估算最多可能排在
+  「获得物资」前面的通知条数）与 `NotificationTimeoutSeconds(int)`（从容器解析 `UIConfig.
+  NotificationSeconds`，算不到时退回 2.5，`N = (排队条数 + 自己这一条) × 单条秒数 + 2` 秒缓冲，
+  不写死），`Check` 的 `cond` 用一个闭包变量 `rewardSeen` 记住「有没有见过」，逐帧采样，
+  一旦见过就一直为真（不再要求那一帧恰好命中）。检查点 11（开箱成功）与 13（支线计数 +1）的文案
+  补充说明「这些状态在 `TryCollect` 返回时已同步生效，不经过通知队列 / 不依赖通知是否已经轮到」，
+  澄清它们本来就不该受通知时序影响。只改了 `ExplorationShowcase.cs` 这一个文件，运行时代码未动。
+  - 证据：`python .claude/skills/project-lint/lint.py ExplorationShowcase.cs` 退出码 0；
+    `refresh_unity(compile=request)` 后 `read_console(error)` 0 条；单跑
+    `Crate_CollectGivesRewardAndQuestProgress` PASS（检查点 12 实测在开箱后约 5.8 秒才等到通知，
+    验证了原 3 秒超时确实不够、新超时够用），报告
+    `Logs/verify/exploration/20260926-141257/report.md`；随后 8 条全跑，
+    `Logs/verify/exploration/20260926-141506/report.md` 显示 **8/8 PASS，检查点失败 0、运行时异常 0**。
+  - 偏离：等待时间从原来「最多 3 秒」放宽到「最多 12 秒」，单条用例变慢但换来不靠猜时序的稳定性；
+    没有改用「直接读队列深度」的精确断言（选项 b），因为 `INotificationService` 没有暴露队列深度或
+    当前项的公开接口，加这种只读探针超出本波授权修改的文件范围（不碰运行时代码）。

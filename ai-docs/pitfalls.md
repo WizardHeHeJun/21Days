@@ -281,3 +281,43 @@
 - 根因：Luban 生成时内容与磁盘上已有文件相同就不重写，是生成器的正常行为，不是生成失败。
 - 正确做法：判断「这次生成跑过」看 Console 的「生成完成，资产已刷新」，不要看文件时间戳；要验证内容确实变了，就先改一处表数据再生成对比。
 - 关联：`Assets/_Project/Scripts/Editor/Config/GenerateTablesMenu.cs`；2026-09-26 任务编辑器那轮 T5 实测。
+
+## MCP 预制体舞台改动可能不落盘，agent 报告「已改」不能当数
+- 现象：波 8（`ResetButton` 挪左下角）agent 用 MCP 预制体舞台（`open_prefab_stage` → `set_property` →
+  `save_prefab_stage`）改完并做了 YAML 复核，报告里也写了复核结果，但用户后续截图发现按钮还压在
+  左上角原位；实际 `git diff` 一看，提交进库的 `ExplorationHudView.prefab` 里 `ResetButton` 的
+  `anchoredPosition` 仍是改前的 `(16, -130)`——舞台里的修改没有真正写回磁盘上的预制体资产。
+- 根因：预制体舞台（Prefab Stage）是编辑器里的一份内存副本，`save_prefab_stage` 依赖舞台仍处于
+  预期状态才会落盘；并发会话频繁切场景 / 跑 PlayMode 测试触发的域重载或场景切换会打断舞台，
+  agent 拿到的「保存成功」返回值不能保证这次保存真的写到了资产文件，YAML 复核如果读的是内存态
+  或读的时机在真正落盘之前，同样会得出「已经改对」的假阳性。
+- 正确做法：改预制体用 `execute_code` 走 `PrefabUtility.LoadPrefabContents(path)` 加载一份独立的
+  离屏副本 → 直接改 `RectTransform` 等组件字段 → `PrefabUtility.SaveAsPrefabAsset(root, path, out ok)`
+  → `PrefabUtility.UnloadPrefabContents(root)` → `AssetDatabase.SaveAssets()`；这条路径不经过任何
+  可能被打断的编辑器舞台。改完用 Bash 直接 `grep`/`sed` 读磁盘上的 YAML 核对字段值，并跑
+  `git diff --stat -- <预制体路径>` 确认真的有改动落盘；再 `refresh_unity` 一次后**重新读一遍 YAML**，
+  确认没有被后续的资产刷新或别的会话覆盖 / 回滚。全程不要在任何场景里留下该预制体的实例。
+- 关联：`ai-docs/pitfalls.md #用 MCP 在活动场景里搭 UI 预制体，散件会随场景一起保存`；
+  `PRP/exploration-whitebox/tasks.md` 波 8 T16、波 12（本次用新方法改 `ImmersiveButton`/`ResetButton`
+  右上角位置并复核成功）。
+
+## 走 Boot 的回放会写玩家真实存档槽，第 4 次新游戏就进不了场景
+- 现象：`ExplorationShowcase` 8 条用例前 3 条 PASS，第 4 条起全部卡在 `EnterExploration()` 的
+  「等进入探索场景」超时；跑完一看，真实存档目录 `<persistentDataPath>/saves/` 下多出了
+  `slot1.json`、`slot2.json`、`slot3.json`。
+- 根因：标题「开始」现在走真实存档链路（`SessionTitleRouter` → `GameSession.NewGameAsync` →
+  `SessionTitleRules.PickNewGameSlot` 选第一个空槽 → `MonsterEncounterState` 进场景后自动写
+  `<IPlatformService.SaveRoot>/slot{N}.json`）；`SessionConfig.slotCount = 3`。回放走的是真 Boot，
+  没有覆盖 `SaveRoot`，每条用例点一次「开始」就真占用一个槽。3 个槽在第 3 条用例后全部写满，
+  第 4 条起 `PickNewGameSlot` 找不到空槽返回 0，路由改成打开 `SaveSlotsController.OpenAsync
+  (SlotsMode.NewGame)` 选槽面板而不是直接进场景，回放却仍在等「进入探索场景」，于是必超时。
+- 正确做法（**已根治，2026-09-26**）：不用再各自模块备份/还原槽文件了——`PlatformServiceBase.SaveRootOverride`
+  已落地，`ShowcaseScenario.ShowcaseSetUp/TearDown` 统一在加载 Boot 之前把 `SaveRoot` 重定向到临时隔离目录、
+  收尾时清理，细节见下一条「从『开始』进场景的回放把玩家真实存档写满了」。`ExplorationShowcase` 若仍在用
+  `IsolateSaveSlots` / `RestoreSaveSlots` 这套自备份，应当改为直接依赖基类的覆盖目录并删掉这段自建逻辑
+  （同 `SessionShowcase` 2026-09-26 的改法）；新写的回放不要再照抄这条里的临时备份方案。
+- 关联：`Assets/_Project/Scripts/Tests/Showcase/Exploration/ExplorationShowcase.cs`；
+  `Assets/_Project/Scripts/Core/Save/JsonSaveService.cs`（槽文件命名 `GetSlotPath`/`ProfilePath`）；
+  `Assets/_Project/Scripts/Runtime/Session/SessionTitleRules.cs`；
+  `ai-docs/pitfalls.md #从『开始』进场景的回放把玩家真实存档写满了`；2026-09-26 探索白盒波 13，同日由存档会话根治。
+
