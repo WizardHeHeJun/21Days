@@ -5,10 +5,12 @@ using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Game.Core.Assets;
+using Game.Core.Logging;
 using Game.Core.Telemetry;
 using Game.Core.Timing;
 using Game.Core.UI;
 using Game.Narrative;
+using Game.Performance;
 using UnityEngine;
 
 namespace Game.Dialogue
@@ -17,6 +19,10 @@ namespace Game.Dialogue
     /// 对白表现控制器：逐帧驱动打字、自动播放、跳过（先经确认弹窗）与历史面板，把 View 的点击翻译成规则意图。
     /// <para>
     /// 「覆盖中」：历史面板或跳过确认弹窗开着时不打字、不自动、不跳过，主面板输入关闭。
+    /// </para>
+    /// <para>
+    /// 「演出中」（<see cref="Performing"/>）：节点带 <c>PerformanceId</c> 时，摆台词之前先 await 演出服务播完；
+    /// 期间语义同「覆盖中」，且点击 / 按键 / 自动 / 倍速 / 跳过全部忽略。时停与输入图由两边服务各自持令牌，本类不碰。
     /// </para>
     /// <para>
     /// 角色表不在构造时取：<see cref="DialogueCatalog.Characters"/> 惰性依赖 <c>IConfigService</c> 初始化完成，
@@ -36,6 +42,8 @@ namespace Game.Dialogue
         private readonly IAssetService assets;
         private readonly IClock clock;
         private readonly ITelemetryScope telemetry;
+        // 可为 null：Boot 没挂 PerformanceInstaller 时节点插播跳过（记 Warn + 埋点），不阻塞对白。
+        private readonly IPerformanceService performance;
         private readonly AssetHandle<Sprite>[] handles = new AssetHandle<Sprite>[DialogueContent.SlotCount];
         // 选项图标：地址 → 句柄。键存在而值为 null 表示加载中或加载失败（不重复请求）；换节点 / 收尾时整体释放。
         private readonly Dictionary<string, AssetHandle<Sprite>> choiceIcons =
@@ -55,6 +63,9 @@ namespace Game.Dialogue
         private bool skipConfirmRequested;
         private bool skipConfirmed;
         private bool skipCancelled;
+        private bool performing;
+        // 演出服务缺席的 Log.Warn 每个控制器只打一次（埋点每次都埋），免得每句插播刷屏。
+        private bool performanceWarned;
         // 每次释放选项图标自增；异步加载完成时对不上说明节点已换或对白已收尾，句柄直接释放。
         private int choiceIconEpoch;
         private CancellationToken presentToken;
@@ -73,7 +84,7 @@ namespace Game.Dialogue
         private string historyKeyHint = string.Empty;
 
         public DialogueController(DialogueRules rules, DialogueCatalog catalog, IUIService ui, IAssetService assets,
-            IClock clock, ITelemetryScope telemetry)
+            IClock clock, ITelemetryScope telemetry, IPerformanceService performance = null)
         {
             this.rules = rules ?? throw new ArgumentNullException(nameof(rules));
             this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
@@ -81,6 +92,7 @@ namespace Game.Dialogue
             this.assets = assets ?? throw new ArgumentNullException(nameof(assets));
             this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
             this.telemetry = telemetry ?? NullTelemetryScope.Instance;
+            this.performance = performance;
         }
 
         /// <summary>外部挂起（如存档中）：挂起期间不推进、不收输入。</summary>
@@ -88,6 +100,8 @@ namespace Game.Dialogue
         public bool IsRunning => running;
         /// <summary>未展示，或当前节点已准备完毕（可存档的稳定点）。</summary>
         public bool IsStable => !running || ready;
+        /// <summary>正在播放节点前插播的演出：不打字、不自动、不推进，点击与按键全部忽略（语义同覆盖中）。</summary>
+        public bool Performing => performing;
 
         /// <summary>
         /// 展示当前对白直到完成，返回出口。调用方须先 <c>rules.Start(content)</c>（或 Restore），本方法只负责表现。
@@ -133,6 +147,9 @@ namespace Game.Dialogue
                         ready = false;
                         visit = rules.Visit;
                         policy.OnNodeChanged();
+                        // 插播点：节点前演出（跳过快进中不插播）；演出期间对白可能被外部中断，回来先比对身份。
+                        await PerformBeforeNodeAsync(ct);
+                        if (generation != rules.Generation || visit != rules.Visit) continue;
                         await PrepareAsync(generation, visit, ct);
                         if (generation != rules.Generation || visit != rules.Visit) continue;
                         ready = true;
@@ -206,6 +223,7 @@ namespace Game.Dialogue
             finally
             {
                 ready = false;
+                performing = false;
                 if (view != null)
                 {
                     view.OnIntent -= Submit;
@@ -281,6 +299,7 @@ namespace Game.Dialogue
         /// </summary>
         internal void HandleKey(DialogueKeyboardInput.Key key)
         {
+            if (performing) return; // 演出中按键归演出服务（确认 / 长按跳过），对白一律不响应
             DialogueKeyboardInput.Command command = DialogueKeyboardInput.Map(key, KeyState);
             switch (command.Kind)
             {
@@ -298,7 +317,51 @@ namespace Game.Dialogue
             }
         }
 
-        private bool Overlaid => historyOpen || skipConfirmOpen;
+        // 覆盖中：历史 / 跳过确认弹窗开着，或正在插播演出——三者都不打字、不自动、不跳过、不收主面板输入。
+        private bool Overlaid => historyOpen || skipConfirmOpen || performing;
+
+        // 节点前插播演出。只在新进节点（Preparing）时播：跳过快进中略过，存档恢复到已就绪的句子也不重播。
+        // 服务缺席记 Warn 后照常摆台词；演出失败记 Error 后照常摆台词；取消原样抛出。
+        private async UniTask PerformBeforeNodeAsync(CancellationToken ct)
+        {
+            DialogueContent.Node node = rules.Current;
+            if (string.IsNullOrEmpty(node.PerformanceId) || policy.Skipping ||
+                rules.Phase != DialogueSaveData.Phase.Preparing) return;
+            if (performance == null)
+            {
+                if (!performanceWarned)
+                {
+                    performanceWarned = true;
+                    Log.Warn("对白节点配置了插播演出，但演出服务未注册（Boot 没挂 PerformanceInstaller？），已跳过演出：" +
+                             node.PerformanceId);
+                }
+                telemetry.TrackWarn("performance_unavailable",
+                    TelemetryProps.Of(("node", node.Id), ("performance", node.PerformanceId)));
+                return;
+            }
+            performing = true;
+            view.SetInput(false);
+            try
+            {
+                await performance.PlayAsync(node.PerformanceId, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                Log.Error($"对白节点 {node.Id} 的插播演出 {node.PerformanceId} 播放失败，跳过演出继续对白：{e.Message}");
+                telemetry.TrackError("performance_failed", e,
+                    TelemetryProps.Of(("node", node.Id), ("performance", node.PerformanceId)));
+            }
+            finally
+            {
+                performing = false;
+            }
+            // 演出期间对白可能已被外部 Cancel / Restore（generation / visit 变了）：由调用方比对后 continue，这里只处理取消。
+            ct.ThrowIfCancellationRequested();
+        }
 
         private void EnsureCharacters()
         {
@@ -453,8 +516,8 @@ namespace Game.Dialogue
             Submit(new DialogueIntent(DialogueIntent.Action.Advance, rules.Generation, rules.Visit));
         }
 
-        private void ToggleAuto() { if (running) policy.ToggleAuto(); }
-        private void CycleSpeed() { if (running) policy.CycleSpeed(); }
+        private void ToggleAuto() { if (running && !performing) policy.ToggleAuto(); }
+        private void CycleSpeed() { if (running && !performing) policy.CycleSpeed(); }
         // 点跳过只请求确认弹窗，确认后才 BeginSkip；已在跳过中或覆盖中则忽略。
         private void RequestSkip() { if (running && !policy.Skipping && !Overlaid) skipConfirmRequested = true; }
         private void ConfirmSkip() => skipConfirmed = true;

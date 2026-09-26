@@ -15,6 +15,7 @@
             "next": "m2",
             "outcome": "",
             "blocking": true,
+            "performance": "",
             "choices": []
         },
         {
@@ -30,6 +31,7 @@
             "next": "end",
             "outcome": "",
             "blocking": true,
+            "performance": "",
             "choices": []
         },
         {
@@ -45,6 +47,7 @@
             "next": "",
             "outcome": "Done",
             "blocking": true,
+            "performance": "",
             "choices": []
         }
     ]

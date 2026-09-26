@@ -87,6 +87,11 @@ MonoBehaviour:
     m_ReadOnly: 0
     m_SerializedLabels: []
     FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 934c4115c93ea8d409a7318383a10026
+    m_Address: PerformanceView
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: a3de1a952dfcfcf4ca2fe7fc00291e36
     m_Address: QuestHudView
     m_ReadOnly: 0

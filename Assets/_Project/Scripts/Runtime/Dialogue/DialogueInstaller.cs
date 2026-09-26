@@ -9,6 +9,7 @@ using Game.Core.Logging;
 using Game.Core.Telemetry;
 using Game.Core.Timing;
 using Game.Core.UI;
+using Game.Performance;
 using MessagePipe;
 using UnityEngine;
 using VContainer;
@@ -47,7 +48,10 @@ namespace Game.Dialogue
                     resolver.Resolve<IUIService>(),
                     resolver.Resolve<IAssetService>(),
                     resolver.Resolve<IClock>(),
-                    resolver.Resolve<ITelemetryService>().Scope(TelemetryModule)), Lifetime.Singleton);
+                    resolver.Resolve<ITelemetryService>().Scope(TelemetryModule),
+                    // 演出服务可缺席（Boot 没挂 PerformanceInstaller）：取不到传 null，节点插播记 Warn 后跳过。
+                    resolver.TryResolve(out IPerformanceService performance) ? performance : null),
+                Lifetime.Singleton);
             builder.Register<IDialogueConditionSource, DefaultDialogueConditionSource>(Lifetime.Singleton);
             builder.Register<DialogueService>(resolver => new DialogueService(
                     resolver.Resolve<DialogueCatalog>(),
