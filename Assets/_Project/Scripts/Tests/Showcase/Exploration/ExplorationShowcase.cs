@@ -43,7 +43,6 @@ namespace Game.Tests.Showcase.Exploration
         private const int CrateQuestId = 2002;
         private const string PromptText = "E 打开物资箱";
         private const string RewardTitle = "获得物资";
-        private const string CrateABody = "铁剑 ×1";
 
         /// <summary>摇杆推动的时长（真实时间）。步行 3 m/s、奔跑 5 m/s，0.6 秒足够拉开差距。</summary>
         private const float StickSeconds = 0.6f;
@@ -173,6 +172,10 @@ namespace Game.Tests.Showcase.Exploration
         {
             yield return EnterExploration();
 
+            yield return Check("默认关闭：出生点没有任何激活的万向标克隆", () => ShownCompassCount() == 0, 3f);
+
+            yield return Step("打开万向标开关（默认关）", () => ResolveService<ExplorationCompassPresenter>().Enabled = true, 0f);
+
             int visiblePoi = 0;
             yield return Step("站在出生点看万向标", () => visiblePoi = VisiblePoiCount());
             yield return Check("至少 3 个屏外兴趣点有贴边万向标，且至少 1 个屏内兴趣点没有标记",
@@ -215,8 +218,10 @@ namespace Game.Tests.Showcase.Exploration
             yield return Step("确认开箱", () => first = loot.TryCollect(focus.Current), 0f);
             yield return Check("开箱成功：箱子变开、头顶标记消失、提示消失",
                 () => first && crateA.IsOpened && !CrateMarkerActive(crateA) && !HudActive("InteractPrompt"), 3f);
-            yield return Check($"顶部通知「{RewardTitle}」，正文为「{CrateABody}」（Crate_A = tbitem 1001 铁剑 ×1）",
-                () => NotificationShows(RewardTitle, CrateABody), 3f);
+            // 期望正文数据驱动：物品名查 tbitem、拼法走 LootService.ComposeBody（同开箱路径），场景改 itemId / 表改名都不用改这里。
+            string crateABody = ExpectedRewardBody(crateA);
+            yield return Check($"顶部通知「{RewardTitle}」，正文为「{crateABody}」（Crate_A = tbitem {crateA.ItemId} ×{crateA.Count}）",
+                () => NotificationShows(RewardTitle, crateABody), 3f);
             yield return Check("支线 2002 计数 +1（1/3），背包多了物品",
                 () => CrateQuestCount() == 1 && ItemTotal() > itemsBefore, 3f);
             yield return Snapshot("开箱·获得物资");
@@ -344,8 +349,9 @@ namespace Game.Tests.Showcase.Exploration
         }
 
         /// <summary>
-        /// 波 10：粗射线（球形扫掠）让前景高物体也淡出。Tower 在 (12, 10.4)、顶高 9.39，玩家走西侧楼梯中段 (16, 15.5) 时
-        /// 相机 → 胸口的视线从塔北侧擦过——波 9 的细射线碰不到它，粗射线要能擦到。
+        /// 波 10：粗射线（球形扫掠）让前景高物体也淡出。Tower 在 (12, 10.4)、半径 2.5、顶高 9.39。
+        /// 实测 (16, 15.5)（楼梯中段）塔东沿离视线约 1.5 m、视线从塔顶上方越过，塔只占画面左侧、不压人（截图为证），按 1 m 半径不淡；
+        /// 走到楼梯下段 (13.8, 15.5)（第 8 级）时塔的北上沿压住人，这里验淡出。
         /// </summary>
         [UnityTest]
         public IEnumerator Occluder_FadesTowerWhenPlayerOnStairs()
@@ -356,7 +362,7 @@ namespace Game.Tests.Showcase.Exploration
 
             yield return Check("初始塔体不透明", () => !tower.IsFaded && towerRenderer.sharedMaterial != tower.FadedMaterial, 3f);
 
-            yield return Step("把玩家挪到西侧楼梯中段 (16, 15.5)", () => playerRules.Reset(new Vector2(16f, 15.5f)));
+            yield return Step("把玩家挪到西侧楼梯下段 (13.8, 15.5)（塔压住人的位置）", () => playerRules.Reset(new Vector2(13.8f, 15.5f)));
             yield return Check("前景的 Tower 变半透明（sharedMaterial = M_Graybox_Faded），能看见楼梯上的人",
                 () => tower.IsFaded && towerRenderer.sharedMaterial == tower.FadedMaterial, 3f);
             yield return Step("等淡出过渡走完", null, 0.5f);
@@ -599,6 +605,27 @@ namespace Game.Tests.Showcase.Exploration
             }
 
             return visible;
+        }
+
+        /// <summary>按箱子的 itemId / count 算通知正文：名字查 tbitem（查不到用「#id」，同 LootService），格式取 LootConfig.RewardBodyFormat。</summary>
+        private string ExpectedRewardBody(SupplyCrate crate)
+        {
+            Game.Core.Config.IConfigService config = ResolveService<Game.Core.Config.IConfigService>();
+            LootConfig lootConfig = ResolveService<LootConfig>();
+            // cfg.Item 继承 Luban.Runtime 的 BeanBase，本程序集不引用 Luban.Runtime，所以取表行走反射（只动 ExplorationShowcase，不改 asmdef）。
+            string name = null;
+            if (config != null)
+            {
+                object table = config.Tables.TbItem;
+                object item = table.GetType().GetMethod("GetOrDefault").Invoke(table, new object[] { crate.ItemId });
+                name = item == null ? null : item.GetType().GetField("Name").GetValue(item) as string; // Luban 生成的是 readonly 字段
+            }
+
+            if (string.IsNullOrEmpty(name))
+            {
+                name = "#" + crate.ItemId;
+            }
+            return LootService.ComposeBody(lootConfig == null ? null : lootConfig.RewardBodyFormat, name, crate.Count);
         }
 
         private bool NotificationShows(string title, string body)
