@@ -226,7 +226,7 @@ namespace Game.Session
 
             // 删掉的可能是最近槽：标题「继续」跟着更新（面板关掉后标题直接可见，不等下一次回标题）。
             TitleView title = ui.Get<TitleView>();
-            if (title != null) title.SetContinueEnabled(SessionTitleRules.ShouldEnableContinue(session.LatestSlot));
+            if (title != null) title.SetContinueVisible(SessionTitleRules.ShouldShowContinue(session.LatestSlot));
         }
 
         // 开通用确认弹窗等玩家选择；弹窗被 Esc 关掉按取消。关闭由调用方负责（ConfirmView 约定）。

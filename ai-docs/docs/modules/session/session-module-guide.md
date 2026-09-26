@@ -32,8 +32,8 @@ maturity: seed
 | `SaveGateRules` | 纯静态：`CanSave` 四条件、`Request`/`Take` 合并待处理请求 | `GameSession.Tick` 调（`SaveGateRules.cs:10`） |
 | `ISessionStateSource` / `SessionStateAdapter` | 把 Quest / Dialogue / Monster / UIService 的具体依赖包成一个接口，供 `GameSession` 在 EditMode 里假实现测试 | `SessionInstaller` 注册适配器为该接口（`ISessionStateSource.cs`、`SessionStateAdapter.cs:18`） |
 | `SaveTriggerBridge` | 入口点：把任务三事件 / 开箱 / 对白结束 / 场景切换完成 接成 `RequestSave`；离开玩法状态与退出游戏接成 `SaveNowAsync` | 根作用域入口点（`SaveTriggerBridge.cs:23`） |
-| `SessionTitleRouter` | 入口点：标题「开始 / 继续 / 选择存档」三事件路由；回标题时按 `LatestSlot` 置灰「继续」 | 根作用域入口点（`SessionTitleRouter.cs:25`） |
-| `SessionTitleRules` | 纯静态：`PickNewGameSlot`、`ShouldEnableContinue` | `SessionTitleRouter` 调（`SessionTitleRules.cs:10`） |
+| `SessionTitleRouter` | 入口点：标题「开始 / 继续 / 选择存档」三事件路由；回标题时按 `LatestSlot` 显示 / 隐藏「继续」 | 根作用域入口点（`SessionTitleRouter.cs:25`） |
+| `SessionTitleRules` | 纯静态：`PickNewGameSlot`、`ShouldShowContinue` | `SessionTitleRouter` 调（`SessionTitleRules.cs:10`） |
 | `SaveSlotsController` | 选槽面板的会话控制：开面板、点击分派、覆盖 / 删除二次确认、离开标题时收掉面板 | 根作用域单例，被 `SessionTitleRouter` 按具体类型注入（`SaveSlotsController.cs:24`） |
 | `SaveSlotsView` | `UIView`（Panel）：三行槽位 + 删除 + 返回，只显示与抛事件 | `IUIService` 实例化（`SaveSlotsView.cs:26`） |
 | `SessionConfig` | SO：槽数、保存提示文案与秒数、读档失败文案、进度占位文案、退出钩子超时 | `Data/Session/SessionConfig.asset`（`SessionConfig.cs:10`） |
@@ -67,7 +67,8 @@ maturity: seed
   `SessionSaveData` 分区也算失败），失败则通知「存档不可用」、内存与 `CurrentSlot` 都不动、返回 false；成功才
   `LoadAsync` 整体替换分区、`PrepareRestore(true)`、发事件、进场景。
 - **选槽**：`SessionTitleRouter` 接管标题三事件——「开始」用第一个空槽直接开局，没有空槽开选槽面板
-  `SlotsMode.NewGame`；「继续」读 `LatestSlot`；「选择存档」开面板 `SlotsMode.Load`。`SaveSlotsController`
+  `SlotsMode.NewGame`；「继续」读 `LatestSlot`，没有可用存档（`LatestSlot == 0`）时「继续」**隐藏**（不是置灰，
+  `TitleView.SetContinueVisible(SessionTitleRules.ShouldShowContinue(...))`；回标题与选槽面板删掉最后一个存档后走同一判定）；「选择存档」开面板 `SlotsMode.Load`。`SaveSlotsController`
   负责面板会话（覆盖 / 删除走 `ConfirmView.WaitAsync`）；流程一旦离开标题（继续 / 新游戏成功），控制器订阅的
   `GameStateChangingEvent(From == TitleState)` 会自己把面板收掉，不会残留盖在玩法画面上（`SaveSlotsController.cs:148`）。
 - **面板行的可选 / 可删规则**（`SaveSlotsView.IsRowSelectable` / `IsDeleteVisible`）：读档模式下只有

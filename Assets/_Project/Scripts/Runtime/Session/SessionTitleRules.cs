@@ -1,4 +1,4 @@
-// 职责：标题路由的纯判定——新游戏落哪个槽、「继续」按钮是否可点。
+// 职责：标题路由的纯判定——新游戏落哪个槽、「继续」按钮是否显示。
 // 为什么新建：SessionTitleRouter 依赖 MessagePipe 订阅与 UI 服务，EditMode 里不起容器测不了；
 //   两条判定抽成静态纯函数单独可测，路由只负责「事件 → 判定 → 调 GameSession」。
 
@@ -21,7 +21,7 @@ namespace Game.Session
             return 0;
         }
 
-        /// <summary>「继续」是否可点：有最近可用槽（槽号从 1 起，0 = 没有可用存档）。</summary>
-        public static bool ShouldEnableContinue(int latestSlot) => latestSlot > 0;
+        /// <summary>「继续」是否显示：有最近可用槽（槽号从 1 起，0 = 没有可用存档，此时隐藏按钮）。</summary>
+        public static bool ShouldShowContinue(int latestSlot) => latestSlot > 0;
     }
 }

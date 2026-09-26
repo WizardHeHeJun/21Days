@@ -262,8 +262,9 @@ namespace Game.Tests.Showcase.Session
             }, 0f);
             yield return WaitUntil("回到标题界面", () => leftToTitle && flow.Current is TitleState && ui.Get<TitleView>() != null,
                 EnterTimeoutSeconds);
-            yield return Check("标题「继续」可点（最近存档是槽 1）",
-                () => session.LatestSlot == 1 && RequireTitleButton("ContinueButton").interactable, 3f);
+            yield return Check("标题「继续」显示且可点（最近存档是槽 1；没有存档时隐藏）",
+                () => session.LatestSlot == 1 && RequireTitleButton("ContinueButton").gameObject.activeInHierarchy
+                    && RequireTitleButton("ContinueButton").interactable, 3f);
             yield return Snapshot("回到标题");
 
             // ⑦ 继续：读回槽 1。

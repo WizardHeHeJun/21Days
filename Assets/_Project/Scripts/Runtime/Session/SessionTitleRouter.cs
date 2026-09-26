@@ -1,5 +1,5 @@
 // 职责：标题页三个入口的去向——「开始」用第一个空槽开新游戏（没有空槽开选槽面板的新游戏模式）、
-//   「继续」读最近槽（没有则按新游戏处理）、「选择存档」开选槽面板的读档模式；回到标题时按有无可用存档置灰「继续」。
+//   「继续」读最近槽（没有则按新游戏处理）、「选择存档」开选槽面板的读档模式；回到标题时按有无可用存档显示 / 隐藏「继续」。
 // 为什么新建：Core 的 TitleState 只把点击转成框架事件，去向由玩法层决定（TitleState 文件头）。原先的 MonsterTitleRouter
 //   直接跳遭遇状态、不知道存档槽，按 PRP save-session D5 退役；这里归存档会话，Monster 不再管标题。
 
@@ -97,7 +97,7 @@ namespace Game.Session
 
             // TitleView 是 MonoBehaviour，判空只用 != null。
             TitleView view = ui.Get<TitleView>();
-            if (view != null) view.SetContinueEnabled(SessionTitleRules.ShouldEnableContinue(session.LatestSlot));
+            if (view != null) view.SetContinueVisible(SessionTitleRules.ShouldShowContinue(session.LatestSlot));
         }
 
         private async UniTaskVoid RouteAsync(TitleAction action)
@@ -151,12 +151,12 @@ namespace Game.Session
             await session.NewGameAsync(slot, ct);
         }
 
-        // 「继续」：读最近槽；没有可用存档（按钮本应置灰，键盘 / 旧状态绕过时）按「开始」处理。
+        // 「继续」：读最近槽；没有可用存档（按钮本应隐藏，键盘 / 旧状态绕过时）按「开始」处理。
         // 读失败时 GameSession 已发「存档不可用」通知并保持标题，这里只留痕。
         private async UniTask ContinueAsync(CancellationToken ct)
         {
             int latest = session.LatestSlot;
-            if (!SessionTitleRules.ShouldEnableContinue(latest))
+            if (!SessionTitleRules.ShouldShowContinue(latest))
             {
                 telemetry.Track("title_continue", ("slot", 0), ("fallback", true));
                 await StartNewGameAsync(ct);

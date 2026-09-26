@@ -42,15 +42,15 @@ namespace Game.Tests.EditMode.Session
         }
 
         [Test]
-        public void ShouldEnableContinue_WhenLatestSlotZero_ReturnsFalse()
+        public void ShouldShowContinue_WhenLatestSlotZero_ReturnsFalse()
         {
-            Assert.That(SessionTitleRules.ShouldEnableContinue(0), Is.False);
+            Assert.That(SessionTitleRules.ShouldShowContinue(0), Is.False);
         }
 
         [Test]
-        public void ShouldEnableContinue_WhenLatestSlotPositive_ReturnsTrue()
+        public void ShouldShowContinue_WhenLatestSlotPositive_ReturnsTrue()
         {
-            Assert.That(SessionTitleRules.ShouldEnableContinue(2), Is.True);
+            Assert.That(SessionTitleRules.ShouldShowContinue(2), Is.True);
         }
     }
 }
