@@ -148,6 +148,7 @@
   纯属自己的文件照常 `git add`。**别用 `git add -p`**：交互式在本环境跑不了。
 - 关联：`CLAUDE.md #硬规则 4`、`.claude/skills/review-change/SKILL.md #并发会话`；2026-09-15 起连续七次提交都这么做，2026-09-16 沉淀。
 - **并行改同一批文件（2026-09-26）**：这次不是提交期撞车，是**开工期**就撞了——两个会话各自派 subagent 改 Player / Input / UIService 等同一批文件，而且两边设计还不一样（字段命名、迁移路径都不同）。发现得晚一步就会互相覆盖；这次是其中一个 subagent 中途 `git status`/`git diff` 发现对方的未提交改动跟自己要改的文件重叠，主动停手，另一边才没被覆盖。正确做法：开工前先 `git status` 看工作区有没有别人的未提交改动；有就先跨会话发消息划清各自改哪些文件、谁的底层设计为准，不要各写各的等提交时再对；改共用文件前**重新 `Read`**（别信自己上一轮读到的内容，对方可能已经改过），只做最小插入，不顺手重排或重构无关部分；改完等到「编译零错误 + EditMode 全绿」这个稳定点再通知对方开工，不要在半成品状态上招呼别人接手。
+- **共享索引与临时索引提交（2026-09-26）**：`git commit` 不带路径会把别的会话 `git add` 进共享索引的文件一起带走（今天两个会话各踩一次）；混合文件即使按路径提交（`git commit -- <路径…>`），只要该路径在共享索引里已经是对方 `add` 过的混合版本，拿到的仍是连着对方未完成追加的那一份，不是自己单独的改动。稳妥做法是以 `git show HEAD:<文件>` 为基线，只重放自己这一轮的改动生成一份临时文件，再走一条完全不碰共享索引的临时索引提交：`GIT_INDEX_FILE=<临时索引路径> git read-tree HEAD` 建一份独立索引 → `git hash-object -w --path <path> <临时文件>` 把重放结果写进对象库，`GIT_INDEX_FILE=<临时索引> git update-index --cacheinfo 100644,<hash>,<path>` 只把这一条换成新版本 → `GIT_INDEX_FILE=<临时索引> git write-tree` 出树 → `git commit-tree <树> -p HEAD -m <信息>` 出提交对象 → `git update-ref refs/heads/main <新提交> <提交前的旧 HEAD>` 带旧值校验推进分支。用这条路径出完提交后，**共享索引里那些被提交的路径仍指向提交前的旧 blob**，相对新 HEAD 会显示成「反向改动」（看起来像被撤销了一样）；必须紧接着 `git reset -- <这些路径>` 把共享索引对齐新 HEAD，否则下一个用整份索引提交（`git commit` 不带路径，或 `git add -A`）的人会把这次刚提交的内容撤掉。
 
 ## 打包期间编辑器是关的，MCP 全部不可用，验证得提前想好命令行退路
 - 现象：`/build` 要求关闭编辑器（工程锁只允许一个实例），于是打包这段时间里 `read_console`、`run_tests`、`execute_code` 全部连不上——而人往往是打完包才想起「我要怎么确认它对不对」，这时只剩一个退出码可看。
@@ -321,3 +322,32 @@
   `Assets/_Project/Scripts/Runtime/Session/SessionTitleRules.cs`；
   `ai-docs/pitfalls.md #从『开始』进场景的回放把玩家真实存档写满了`；2026-09-26 探索白盒波 13，同日由存档会话根治。
 
+## 编辑器 `isCompiling` 长期 true、控制台错误与磁盘不符、反射看到旧签名 —— 程序集重载锁泄漏
+- 现象（2026-09-26 实测）：`QuestInstaller` 的 CS7036 在磁盘早已修好后仍报了十几分钟；`EditorApplication.isCompiling`
+  一直是 `true`；反射看 `QuestService` 的构造仍是旧的 7 参数版本；同时 `editor/state` 资源里 `is_compiling` 却报
+  `false`，两个信息源互相矛盾。
+- 根因：某次测试运行被域重载打断时，`LockReloadAssemblies` 的计数没能归零（大概率是回放框架的锁在异常路径下没走到
+  对称的 Unlock），编辑器认为「还有人要求不许重载」，于是磁盘上已经修好的代码永远编译不进来，控制台报的错、反射看到的
+  签名都停在锁死那一刻，看起来像是「怎么改都没用」。
+- 正确做法：判定依据用**反射看程序集里的实际签名**，不要看控制台报错（控制台这时候是旧状态的回声）。解法是
+  `execute_code` 里连续调几次 `UnityEditor.EditorApplication.UnlockReloadAssemblies()`（锁是计数式的，一次不一定够）
+  + `CompilationPipeline.RequestScriptCompilation()` + `AssetDatabase.Refresh()`，再 `refresh_unity` 一次。预防：回放
+  框架（`ShowcaseScenario`）的锁已经在 TearDown / 退出 Play 时对称释放，但别的会话正在跑测试期间不要保存 `.cs`，
+  被打断的正是这条路径。
+- 关联：`Assets/_Project/Scripts/Tests/Showcase/Framework/ShowcaseScenario.cs`（`AcquireReloadLock` / `ReleaseReloadLock`）、
+  `ai-docs/pitfalls.md #Showcase 回放中途别人保存 .cs`；`PRP/save-session/tasks.md`。
+
+## 从「开始」进场景的回放把玩家真实存档写满了
+- 现象：`SessionShowcase` / `ExplorationShowcase` 这类从标题「开始」进场景的回放，会经真实的存档服务把 `slot1..N.json` 写进 `IPlatformService.SaveRoot`——也就是玩家本机真实存档目录（Windows 上 `%LOCALAPPDATA%Low/DefaultCompany/<产品名>/saves/`）。跑上三条这样的用例后三个槽全被占满，`Session/Exploration` 回放里再点「开始」就不再直落新游戏，而是弹出选槽面板等玩家二选一，回放的 `WaitUntil` 等不到预期状态，直接超时挂住。
+- 根因：`PlatformServiceBase.SaveRoot` 在 2026-09-26 之前只有一种算法——拼 `Application.persistentDataPath`，不区分「真实运行」与「回放测试」。Showcase 复用的是**真实**存档服务（不是 mock），这是它「验证真实启动路径」这个设计初衷决定的，副作用是槽文件必然落进真实目录。最早发现这问题的 `SessionShowcase` 曾经用「SetUp 备份本机槽文件到临时目录、TearDown 还原」自保，但这只解决了「不污染开发者本机存档」，没解决「三条用例之间互相占槽、槽用满后『开始』行为改变」这个根本问题；且每个新写的 Showcase 都要抄一遍这段备份/还原逻辑，抄漏一步就会把真实存档删掉或还原不回去。
+- 正确做法：不再各自模块自保，改成框架统一在**根目录**上做覆盖——`PlatformServiceBase.SaveRootOverride`（静态，默认 null，只给编辑器内测试/回放用）。`SaveRoot` 属性每次读取都先看这个覆盖，非空就直接返回，不走 persistentDataPath 那条老路径。`ShowcaseScenario.ShowcaseSetUp` 在**加载 Boot 场景之前**把它设成 `Application.temporaryCachePath/showcase-saves/<模块小写>-<用例名>`（保证目录存在且为空），`ShowcaseTearDown` 的 `finally` 里无条件置回 `null` 并删除该目录（删失败只 Warn，不影响用例判定）。因为设置发生在 Boot 加载、容器建出 `PlatformServiceFactory.Create()` 之前，且属性每次调用都现读覆盖值（不缓存旧值），所以时机上必然生效。模块作者的 Showcase 不再需要（也不应该）自己碰 `SaveRoot`、自己备份/还原槽文件——直接读 `platform.SaveRoot` 拿到的就是这个隔离目录，坏档用例往这个目录里写坏文件即可，清理交给基类。
+- 关联：`Assets/_Project/Scripts/Core/Platform/PlatformServiceBase.cs`（`SaveRootOverride`）、`Assets/_Project/Scripts/Tests/Showcase/Framework/ShowcaseScenario.cs`（`ShowcaseSetUp`/`ShowcaseTearDown`）、`Assets/_Project/Scripts/Tests/Showcase/Session/SessionShowcase.cs`、`.claude/rules/module-verify.md #编写规范`；2026-09-26 由 `SessionShowcase` 的手工备份/还原自保方案收敛为框架统一方案。
+
+## `run_tests(clear_stuck=true)` 清掉了别的会话真实在跑的 PlayMode 任务
+- 现象：另一会话的模块回放跑到第 7 条用例被清掉，任务状态直接变成 `Failed`，而那条回放本身没有卡死，只是还没跑完。
+- 根因：`clear_stuck=true` 把「当前有一个 `tests_running` 的任务」当成孤儿状态直接清掉，但共用编辑器时这个任务可能是
+  别的会话正常在跑、只是还没到自己的用例。
+- 正确做法：清之前先读 `mcpforunity://editor/state` 的 `tests.current_job_id` 与 `started_unix_ms`，只清确认是**自己
+  起的**、且**已经超过 5 分钟没有任何进展**的任务；共用编辑器时优先用 `get_test_job(wait_timeout=60)` 之类的轮询等待，
+  不要一遇到「暂时没结果」就 `clear_stuck`。
+- 关联：`.claude/skills/unity-mcp/SKILL.md`、`ai-docs/pitfalls.md #Showcase 回放中途别人保存 .cs`；`PRP/save-session/tasks.md`。

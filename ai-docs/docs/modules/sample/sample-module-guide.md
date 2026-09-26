@@ -29,17 +29,17 @@ maturity: stable
 2. **场景地址没登记**：`SampleState.SceneKey = "SampleScene_Game"` 这个地址**没有**出现在
    Addressables Scenes 组（`Assets/AddressableAssetsData/AssetGroups/Scenes.asset` 只登记了
    `IsometricEncounter`、`MonsterEncounter` 两条）。
-3. **标题路由被顶替**：标题「开始」现在由 `MonsterTitleRouter` 接管（订阅同一个
-   `TitleStartClickedEvent`），`SampleTitleRouter` 因为 Installer 未挂根本没进容器，不会被 VContainer
-   实例化，自然也订不上事件。
+3. **标题路由被顶替**：标题「开始」现在由 `Game.Session` 的 `SessionTitleRouter` 接管（订阅同一个
+   `TitleStartClickedEvent`；原先接管过的 `MonsterTitleRouter` 已随存档会话上线删除），`SampleTitleRouter`
+   因为 Installer 未挂根本没进容器，不会被 VContainer 实例化，自然也订不上事件。
 
 **本模块保留为代码样板**（README 与 `developer-guide.md` 仍指向它作为「玩法模块长什么样」的参照），
 **不进启动链**。要试跑它需要三步：
 
 1. 在 Boot 的 `GameBootstrap` 上挂 `SampleInstaller` 组件，并把 `SampleConfig.asset` 拖进 Config 字段；
 2. 把 `Assets/_Project/Scenes/Sample.unity` 加进 Addressables Scenes 组，地址填 `SampleScene_Game`；
-3. **注意**：挂上后它与 `MonsterTitleRouter` 会同时订阅 `TitleStartClickedEvent`，两者都在容器里时
-   点「开始」会竞争（谁先注册谁的 `GoToAsync` 先跑），不要两个同时挂。
+3. **注意**：挂上后它与 `Game.Session` 的 `SessionTitleRouter` 会同时订阅 `TitleStartClickedEvent`，两者
+   都在容器里时点「开始」会竞争（谁先注册谁的 `GoToAsync` 先跑），不要两个同时挂。
 
 ## 内部结构
 

@@ -31,7 +31,9 @@ Claude Code 从 `CLAUDE.md`、Codex 从 `AGENTS.md` 进入，共同读取 [项�
 | Quest | 三件套齐备；Unity 接线完成；策划侧有任务编辑器与编辑期校验（`Scripts/Editor/Quest/`）；回放 3 条 PASS，视觉验收由开发者持续跟进 | [`modules/quest/`](modules/quest/quest-module-guide.md) |
 | Narrative | 纯规则层（seed），未接 Unity；三件套已生成 | [`modules/narrative/`](modules/narrative/narrative-module-guide.md) |
 | Loot | 三件套齐备；物资箱拾取 / 奖励 / 背包分区，SampleScene 已接三只箱子，回放见波 4 | [`modules/loot/`](modules/loot/loot-module-guide.md) |
+| Inventory | 三件套（seed）；背包面板白盒（I / 手柄 RB，全部 / 物品 / 线索筛选），读 Loot 背包 + 物品表，未建回放 | [`modules/inventory/`](modules/inventory/inventory-module-guide.md) |
 | Performance | 三件套齐备；演出管线（时间轴 + 场景触发 / 对白插播）、演出编辑器、Live2D 适配层（SDK 未导入），回放 4 条待开发者视觉验收 | [`modules/performance/`](modules/performance/performance-module-guide.md) |
+| Session | 三件套（seed）；存档会话——自动保存触发 / 稳定边界闸门、槽位元数据、新游戏 / 继续 / 选槽、标题路由；Showcase 回放待补 | [`modules/session/`](modules/session/session-module-guide.md) |
 
 Sample 是端到端跑通框架每一层的样板模块（配置表 → 纯 C# 规则 → 意图 → 状态 → 面板 → 场景 → 注册 → 测试）。
 新玩法模块照它的形状写，文档照它的三件套写。**模块文档随 `/new-feature` 落地模块、`/generate-doc <模块>` 生成而产生**，产生后在本表补一行。

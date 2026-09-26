@@ -63,10 +63,20 @@
       "docs": "ai-docs/docs/modules/loot",
       "status": "ready"
     },
+    "inventory": {
+      "src": "Assets/_Project/Scripts/Runtime/Inventory",
+      "docs": "ai-docs/docs/modules/inventory",
+      "status": "seed"
+    },
     "performance": {
       "src": "Assets/_Project/Scripts/Runtime/Performance",
       "docs": "ai-docs/docs/modules/performance",
       "status": "ready"
+    },
+    "session": {
+      "src": "Assets/_Project/Scripts/Runtime/Session",
+      "docs": "ai-docs/docs/modules/session",
+      "status": "seed"
     }
   }
 }

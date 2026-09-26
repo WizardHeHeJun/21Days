@@ -61,6 +61,7 @@ Showcase 是**给人看的回放**：一条 `[UnityTest]` 按固定顺序调模�
 - 多条用例都加载 Boot 的 Showcase：`GameBootstrap` 只有 `DontDestroyOnLoad`、没有重复实例保护，第二条用例起会叠出多套容器 / UIRoot / EventSystem。加 `[UnityTearDown]` 按类型名找到所有 `GameLifetimeScope` 并 `Destroy` 其 GameObject、等一帧，参考 `Assets/_Project/Scripts/Tests/Showcase/Dialogue/DialogueShowcase.cs` 的 `DestroyBootScope`。
 - 要验证**瞬态**（正在打字、动画进行中、淡入未完成）时，触发它的那一步写 `Step(..., hold: 0f)` 并紧跟带 timeout 的 `Check`；默认 1.5 s 停顿足够让十几个字打完，检查点会红在「状态已经过去了」而不是功能坏了。
 - 验证场景镜头固定时，回放各步的**累计位移要收尾回原点**（或来回对称）：小人一路向右走出画面，`Check` 靠读状态照样绿，但截图是空的，人看不到证据。改速度或时长前先算终点在不在画内。2026-09-26 拼接小人补走 / 跑两步时踩到。
+- 从「开始」进场景的回放会经存档服务写 `slot1..N.json`：**不要自己碰 `IPlatformService.SaveRoot` 或自行备份 / 还原槽文件**——`ShowcaseScenario.ShowcaseSetUp/TearDown` 已经统一用 `PlatformServiceBase.SaveRootOverride` 把它重定向到临时目录并在收尾时清理，模块作者的 `[UnitySetUp]`/`[UnityTearDown]` 直接读 `platform.SaveRoot` 拿到的就是这个隔离目录。
 
 ## 与 EditMode / PlayMode 快测试的分工
 

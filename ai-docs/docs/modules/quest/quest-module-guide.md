@@ -148,7 +148,9 @@ maturity: seed
 
 ## 已知约束 / 未做
 
-- 本期没有读档入口：`InitializeAsync` 里 `Restore` 的是内存默认分区，等 `GameSession` 接读档时同一入口生效。
+- 读档 / 新游戏：`GameSession` 发布 `Game.Session.SessionStartedEvent`（分区已就位之后），`QuestService`
+  在 `InitializeAsync` 里内部订阅，收到后调用 `ReloadFromSave()`（`rules.Restore(saves.Get<QuestSaveData>())` →
+  `ActivateAvailable()` → `Flush()`，`QuestService.cs:135` 附近）；不另起入口点，重载就是门面自己的职责。
 - `Report` 键统一为字符串：TalkTo 的 int → string 只在对白结束时发生一次，不在每帧路径上。
 - 指引依赖 `Camera.main`：相机为空时 `HideGuidance` 并只埋一次 Warn。
 

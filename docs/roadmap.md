@@ -102,7 +102,7 @@
 | --- | --- | --- |
 | UI（`Core/UI/`） | 四层 Hud / Panel / Popup / Top，各一个 Canvas；`OpenAsync` / `CloseAsync` / `CloseTopAsync` / `Get`；`UIView` 三段生命周期 + LitMotion 淡入淡出（两个虚方法可重写）；`UIConfig` 1920×1080、match 0.5、0.15 秒；安全区适配 | 通用确认弹窗、toast / 通知、暂停菜单、设置面板、加载黑场（Top 层至今没有任何 View）、通用屏幕边缘指示器、虚拟摇杆预制体 |
 | 存档（`Core/Save/`） | `ISaveService`：`Get<T>` 分区、`SaveAsync/LoadAsync(slot)`、`ReadCandidateAsync` + `Capture` + `Commit` 两段式、`Exists/Delete`、独立档案 `Read/WriteProfileAsync`；原子写；分区版本迁移。现有分区 5 个：Settings、Dialogue、Quest、Encounter、Narrative | 没有任何游戏代码在存档时机上调 `SaveAsync`；没有槽位界面；没有元数据（时间戳、章节、时长） |
-| 状态流（`Core/Flow/`） | `GameFlow` 串行切换；`BootState` → `TitleState` → 玩法状态；`SceneGameState` 基类 Additive 加载 / 卸载 | 无场景间传送、无加载过渡、无嵌套状态。标题「开始」当前由 `MonsterTitleRouter` 接管，跳 `MonsterEncounterState`（地址 `IsometricEncounter` = SampleScene） |
+| 状态流（`Core/Flow/`） | `GameFlow` 串行切换；`BootState` → `TitleState` → 玩法状态；`SceneGameState` 基类 Additive 加载 / 卸载 | 无场景间传送、无加载过渡、无嵌套状态。标题「开始 / 继续 / 选择存档」现由 `Game.Session` 的 `SessionTitleRouter` 接管，跳 `MonsterEncounterState`（地址 `IsometricEncounter` = SampleScene）；`MonsterTitleRouter` 已删除 |
 | 输入（`Core/Input/` + `Data/Input/GameInput.inputactions`） | Gameplay 图：Move / Confirm / Cancel / Pause / Sneak / Disguise / Tame / Attack；UI 图标准动作；`EnableMap/DisableMap` | Run / Interact / Journal / Immersive 动作与 Dialogue 图已加；`Pause` 由暂停菜单订阅；触屏摇杆与三键已随探索 HUD 落地，仅触屏平台显示；`EncounterTouchControls` 已删除 |
 | 时间与暂停（`Core/Timing/`） | `IWorldPauseService.Acquire(owner)` 引用计数，同时冻结 `Time.timeScale` 与逻辑 tick；Dialogue、Quest 面板在用 | 没有「玩家主动暂停」的使用者 |
 | 音频（`Core/Audio/`） | `PlaySfx / PlaySfxAsync / PlayBgmAsync / StopBgm`、三路音量写回 Settings 分区 | `Assets/_Project/Audio/` 零文件；无环境音层、无导入规则、Addressables 无音频条目 |
@@ -149,7 +149,7 @@
 ### 2.5 已核实的小问题（W0 顺手清）
 
 1. **Sample 模块过期**：`SampleInstaller` 未挂 Boot，`SampleScene_Game` 地址未登记 Addressables。2026-09-26 已按「修」路线在 guide 与 Installer 注释写明现状与试跑步骤，代码保留为样板。
-2. **标题路由只有一条**：`TitleStartClickedEvent` 的订阅者中只有 `MonsterTitleRouter` 在容器里生效（Sample 未挂）。主菜单做出来后这条路由要归到主菜单模块。
+2. **标题路由已归位**：`TitleStartClickedEvent` / `TitleContinueClickedEvent` / `TitleLoadClickedEvent` 现由 `Game.Session` 的 `SessionTitleRouter` 统一接管（`MonsterTitleRouter` 已删除，Sample 未挂）。
 3. **Narrative 三件套**：2026-09-26 已生成并登记（`ai-docs/docs/modules/narrative/`，maturity seed）。
 4. **协作者遗留两条失败测试**：2026-09-26 已修。回放版本常量随 A1 升到 4 并同步测试；存档迁移丢失的根因是读档经快照克隆后 `Get<T>()` 拿到的不是迁移过的实例，已改为直接换入迁移后的实例并补候选路径用例。顺带根治了 UIService 打开失败留下的未观察 UniTask 异常。
 5. **字体资产污染**：`Art/Fonts/Font_NotoSansSC_Regular SDF.asset` 在工作区反复变脏，提交前 Clear Dynamic Data（见 pitfalls）。
@@ -178,7 +178,7 @@
 
 | # | 缺口 | 现状 | 要做什么 | 归属 | 依赖 | 规模 | 派单 | 状态 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B1 | 奖励与背包 | 物资箱拾取已落地（`Runtime/Loot`，奖励写 `LootSaveData.Items`，`tbitem` 引用），但**没有背包界面**，拾取后看不到自己有什么 | 白盒背包（用户 2026-09-26 要求）：`Inventory` 面板（I / 手柄 RB）列出持有物：名字、数量、品质色，占位图标；读 `LootService.Items`，订阅 `CrateCollectedEvent` 刷新；`tbitem` 补描述 / 类别列；奖励语义（信息 / 物品）仍待策划，表结构两者兼容 | 新模块 Inventory | 无 | M | opus | 待做（下一波） |
+| B1 | 奖励与背包 | 物资箱拾取已落地（`Runtime/Loot`，奖励写 `LootSaveData.Items`，`tbitem` 引用），但**没有背包界面**，拾取后看不到自己有什么 | 白盒背包（用户 2026-09-26 要求）：`Inventory` 面板（I / 手柄 RB）列出持有物：名字、数量、品质色，占位图标；读 `LootService.Items`，订阅 `CrateCollectedEvent` 刷新；`tbitem` 补描述 / 类别列；奖励语义（信息 / 物品）仍待策划，表结构两者兼容 | 新模块 Inventory | 无 | M | opus | 白盒完成（2026-09-26）待视觉验收：`Runtime/Inventory/`，B / RB 开面板，筛选全部 / 物品 / 线索，`tbitem` 加 desc / category 两列并新增 1005 破旧信笺（线索）、1006 铜镜碎片（关键物）；无 Showcase；主窗口全量复核已补：EditMode 609 / 609、编译零错误（2026-09-26）；快捷键 B / RB |
 | B2 | 接取 / 完成通知 | 任务只发 4 个事件，无表现 | Core 通用 toast（Top 层，队列，可被沉浸模式隐藏）；订阅 QuestActivated / QuestCompleted | Core/UI + Quest | 无 | S–M | opus | 完成（2026-09-26）待视觉验收；Top 层不随沉浸隐藏，新开局首条主线不弹 |
 | B3 | 任务完成写剧情标记 | PRD 说 Narrative 本期不动 | 任务完成事件 → 剧情标记；对话选项条件读到任务结果 | Quest + Narrative | C2 | S | opus | 待做 |
 | B4 | 进度重置与已完成列表 | 不做 | 依赖存档会话的「新游戏」；已完成列表页 | Quest + E1 | E1 | S | sonnet | 待做 |
@@ -208,8 +208,8 @@
 
 | # | 缺口 | 现状 | 要做什么 | 归属 | 依赖 | 规模 | 派单 | 状态 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| E1 | 游戏级存档会话 | 分区与两段式接口齐备，无调用者、无槽位 UI | **用户 2026-09-26 定**：不做节点式存档，**全状态记录、即存即用**；关键节点自动保存（任务状态变化、开箱、对白结束、场景切换、退出）；主界面可选存档槽（继续 / 新游戏 / 选槽）。实现：`GameSessionController` 在稳定边界（对话 Preparing / 剧情迁移 / 战斗 tick 未提交时不存）把全部分区写入当前槽，候选读取 → 校验 → Commit、失败回滚；槽位元数据（时间、章节、时长） | 新模块 Session（Runtime） | 无 | L | opus，PRP | 待做（下一波） |
-| E2 | 主菜单 | `TitleView` 只有「开始」 | 继续 / 新游戏 / **选择存档（槽位列表，显示时间与章节）** / 设置 / 退出；接管标题路由（替换 `MonsterTitleRouter`）；设置面板已可直接调 `SettingsController.OpenAsync()` | Core/UI Views 或新模块 | E1、E3 | M | opus | 部分完成（2026-09-26）：开始游戏 / 设置 / 退出游戏 + 版本号已做，`TitleView` 转正式（美术占位，替换清单见美术手册 6.10）；继续 / 选择存档等 E1，路由仍是 `MonsterTitleRouter` |
+| E1 | 游戏级存档会话 | 分区与两段式接口齐备，无调用者、无槽位 UI | **用户 2026-09-26 定**：不做节点式存档，**全状态记录、即存即用**；关键节点自动保存（任务状态变化、开箱、对白结束、场景切换、退出）；主界面可选存档槽（继续 / 新游戏 / 选槽）。实现：`GameSessionController` 在稳定边界（对话 Preparing / 剧情迁移 / 战斗 tick 未提交时不存）把全部分区写入当前槽，候选读取 → 校验 → Commit、失败回滚；槽位元数据（时间、章节、时长） | 新模块 Session（Runtime） | 无 | L | opus，PRP | 白盒完成（2026-09-26）待视觉验收，回放见 T6；已知体验问题：「已保存」提示走通知队列 FIFO，会把「获得物资」等玩法通知推后数秒，后续改成不进队列的角落小字 |
+| E2 | 主菜单 | `TitleView` 只有「开始」 | 继续 / 新游戏 / **选择存档（槽位列表，显示时间与章节）** / 设置 / 退出；标题路由归 `Game.Session`（`MonsterTitleRouter` 已删除）；设置面板已可直接调 `SettingsController.OpenAsync()` | Core/UI Views 或新模块 | E1、E3 | M | opus | 继续 / 选择存档已加进 `TitleView`，路由归 Session；开始游戏 / 设置 / 退出游戏 + 版本号已做，`TitleView` 转正式（美术占位，替换清单见美术手册 6.10） |
 | E3 | 设置面板 | `SettingsSaveData` 有音量 / 语言字段，无面板 | 音量三路、语言占位、按键提示；**PC 显示设置**：分辨率列表（取自显示器）、全屏 / 无边框 / 窗口化、垂直同步、帧率上限（见 E8）；写回并落盘 | Core/UI + Core/Save | E5（入口） | M | opus | 完成（2026-09-26）待视觉验收；设置改为跨槽位独立档案 `settings`（分区版本 2）；标题界面已有「设置」入口（2026-09-26） |
 | E4 | 加载过渡 | 加载完直接切 | Top 层黑场 / 进度 View，`SceneGameState` 前后钩子 | Core/UI + Core/Flow | 无 | S–M | opus | 待做 |
 | E5 | 暂停菜单 | `Pause` 动作无人订阅 | 订阅 Pause → `IWorldPauseService.Acquire` → Popup（继续 / 设置 / 回主菜单） | Core/UI | E3 | S–M | opus | 完成（2026-09-26）待视觉验收；Esc 优先级：可关面板 → 关；对白 / 标题 → 无事；沉浸 → 退沉浸；否则开暂停菜单；P 只开不关 |
@@ -281,7 +281,7 @@ H0（前置，已完成 2026-09-26）：`GameInput.inputactions` 一次性加齐
 | --- | --- | --- | --- | --- |
 | **W0 收尾与修正** | 把已完成的两个模块真正交付，清掉已知小问题 | 复跑协作者两条失败测试并处理（2.5 第 4 条）；C4 Narrative 文档登记；E7 Sample 去留；replay / quest tasks.md 补记；SampleScene 命名残留清理；任务面板透底定位 | `/verify-module Dialogue` 与 `/verify-module Quest` 视觉验收点头；字体资产 Clear Dynamic Data；删除另一会话留下的 ToastView 三件（权限拒绝了自动删除） | 机器可做项已完成（2026-09-26），余下只能人做 |
 | **W1 探索层闭环** | 对着「旅行小记」把探索层补齐：走跑、沉浸、交互、拾取、通知 | A1、A2、A5、B2、D4、D5 各自独立派单；A3 + B1 合为一个 PRP「interaction-inventory」 | 策划先定 B1「奖励是信息还是物品」；有人看第二个视频回填 1.3 表 | 进行中：A1 / A2 / B2 / D4 / D5 已完成待视觉验收；A5 延后到移动端移植；A3 / B1（Runtime/Loot）由 21days-46 会话接手 |
-| **W2 叙事与存档** | 对话说了什么能改世界，进度能存能读能继续 | 修订 `PRP/narrative-dialogue/prp.md` 后执行 C1、C2、C3、B3；E1 单独 PRP「game-session」 | 策划给第一章剧情阶段表的样例内容 | 待做 |
+| **W2 叙事与存档** | 对话说了什么能改世界，进度能存能读能继续 | 修订 `PRP/narrative-dialogue/prp.md` 后执行 C1、C2、C3、B3；E1 单独 PRP「game-session」 | 策划给第一章剧情阶段表的样例内容 | E1（`PRP/save-session/`）白盒完成（2026-09-26）待视觉验收，回放见 T6；C1/C2/C3/B3 待做 |
 | **W3 系统 UI 与演出** | 有一个像游戏的外壳，对话像参考那样动起来 | E2、E3、E4、E5、B4；D1、D2；D3 单独 PRP | 美术给对话框 / 立绘 / 插图规格 | E2 部分完成（标题页转正式），其余待做；D3 已由演出管线 PRP 落地（待验收） |
 | **W4 场景与内容** | 从一张灰盒到多场景正式内容 | A4 PRP「world-scenes」；A6；D6；F4；F5 | F1 剧本、F2 环境、F3 角色与 UI 皮肤持续产出 | 待做 |
 | **W5 自家机制** | 照镜 / 画皮 / 收押 / 镜裂 / 追逐躲藏 | G1–G5 每项先玩法定义，再各开 PRP；C5、E6 随之落地 | 策划写定义文档，`/refine-prd` 逐个精炼 | 待定义 |

@@ -173,7 +173,7 @@ Boot.unity 加载
 - **注册顺序就是初始化顺序**。要调整顺序，改 `GameLifetimeScope.Configure` 里的注册先后，不要在别处加调用。顺序按 `architecture.md` 5.1：Platform → Log → Assets → Config → Save → Input → Audio → UI。
 - **加一个新框架服务** = 实现 `IGameService` + 在 `GameLifetimeScope` 里 `.As<I你的接口, IGameService>()`，别的地方一行不用改。
 - **加一个玩法模块** = 写一个 `GameplayInstaller` 子类，把组件挂到 `GameBootstrap` 物体上。`Game.Core` 不认识任何玩法，所以玩法只能这样把自己接上来（第 7 章有完整流程）。**玩法状态必须注册进根作用域**，不能放玩法场景的子作用域——`GameFlow` 从根 `IObjectResolver` 解析状态类型，而且切进去之前那个场景还没加载。
-- 标题界面的「开始」按钮**不在框架里决定去哪**：`TitleView` 抛 `OnStartClicked` 事件 → `TitleState` 发布 `TitleStartClickedEvent` → 玩法侧的入口点订阅它并 `GoToAsync<自己的状态>()`。没有玩法接进来时点了只留一条日志，不是错误。
+- 标题界面的「开始」按钮**不在框架里决定去哪**：`TitleView` 抛 `OnStartClicked` 事件 → `TitleState` 发布 `TitleStartClickedEvent` → 玩法侧的入口点订阅它并 `GoToAsync<自己的状态>()`。没有玩法接进来时点了只留一条日志，不是错误。「继续」「选择存档」同理，分别发布 `TitleContinueClickedEvent` / `TitleLoadClickedEvent`；「继续」置灰调 `TitleView.SetContinueEnabled(false)`。
 - 任何一步抛异常都会被 `BootAsync` 捕获、`Log.Error` 后**停止**启动，不会带着半初始化的状态往下跑。退出播放模式引起的 `OperationCanceledException` 不算错误。
 - 玩法场景走 Additive 加载，Boot 场景全程常驻。
 
@@ -255,7 +255,7 @@ string root = platform.SaveRoot;             // persistentDataPath/saves，启�
 await flow.GoToAsync<TitleState>(ct);
 ```
 
-切换串行：先 `ExitAsync` 当前状态，再 `EnterAsync` 目标状态；切换进行中再请求会**排队**按序执行，完成后发布 `GameStateChangedEvent(from, to)`。状态由容器解析，所以状态类可以构造注入服务。
+切换串行：先 `ExitAsync` 当前状态，再 `EnterAsync` 目标状态；切换进行中再请求会**排队**按序执行，完成后发布 `GameStateChangedEvent(from, to)`；前一状态 `ExitAsync` 之前还会发布一次 `GameStateChangingEvent(from, to)`（离开某状态前要同步抓现场就订阅它，按 `From` 过滤）。状态由容器解析，所以状态类可以构造注入服务。
 
 **状态要带一个场景就继承 `SceneGameState`**，别自己在 `EnterAsync` 里加载：
 
@@ -777,6 +777,16 @@ var rules = new SampleRules(config, telemetry.Scope("sample"));
 - `LoadAsync` 对「没有文件」「JSON 坏了」「信封版本太新」一律记日志返回 `false`，**不抛**——存档坏掉不该把游戏带崩，拿到 `false` 就当新档开。
 - 什么时候存由调用方决定（存档点、退出、设置改完）。别每帧存。
 
+### 9.5 存档会话怎么工作、怎么给模块加一个能参与读档重载的分区
+
+工程现在不是「什么时候存由调用方决定」这么简单：`Game.Session`（`Runtime/Session/`）统一管着「关键节点触发一次自动保存」，玩法模块不用、也不该自己决定什么时候调 `SaveAsync`。
+
+- **触发点**：任务状态变化、开箱、对白结束、场景切换完成走合并式请求（`GameSession.RequestSave(reason)`，同一稳定点内多次请求合并成一次）；离开玩法状态（`GameStateChangingEvent`）与退出游戏（`GameQuit.RegisterBeforeQuit`）直接调 `GameSession.SaveNowAsync`，不等合并。
+- **稳定边界**：不在玩法状态、对白进行中、任意面板 / 弹窗打开中、战斗终局待消费时都不落盘，请求继续挂着到下次边界满足。自己模块要新增触发点，看 `ai-docs/docs/modules/session/session-extension-guide.md`「加一个新的自动保存触发点」。
+- **`saves.Get<T>()` 每次取，不要缓存**：`ResetAll()`（新游戏）与 `LoadAsync()`（读档）都整体替换分区字典，跨帧持有旧分区实例的服务会把改动写进一份没人再读的对象。这条对所有分区都成立，不只是 Session 自己的分区。
+- **读档后重载**：分区所有者在自己的 `IGameService.InitializeAsync` 里订阅 `Game.Session.SessionStartedEvent`，收到后重新 `Get<T>()` 并把数据灌回运行时状态（参照 `QuestService.ReloadFromSave()`，`Runtime/Quest/QuestService.cs`）。`GameSession` 不知道有哪些模块，新模块接入只需要订阅这一个事件，不用改 `Game.Session` 里的任何代码。
+- **独立档案什么时候用**：这一局特有的进度（任务、拾取、遭遇……）进槽位分区；跨局都要保留、且与某一局无关的数据（设置、对白已读记录）走 `ReadProfileAsync` / `WriteProfileAsync` 的独立档案，不进槽——「新游戏」`ResetAll()` 不会碰独立档案，换槽 / 删槽也不影响它们。参照 `Runtime/Dialogue/DialogueReadStore.cs`（档案名 `dialogue-read`）。
+
 ## 10. 输入
 
 ### 10.1 资产与生成物
@@ -789,7 +799,7 @@ var rules = new SampleRules(config, telemetry.Scope("sample"));
 
 | Map | 动作 | 绑定 |
 | --- | --- | --- |
-| `Gameplay` | `Move`(Vector2)、`Confirm`、`Cancel`、`Pause`、`Sneak`、`Disguise`、`Tame`、`Attack`、`Run`、`Immersive`、`Interact`、`Journal` | 见下表 |
+| `Gameplay` | `Move`(Vector2)、`Confirm`、`Cancel`、`Pause`、`Sneak`、`Disguise`、`Tame`、`Attack`、`Run`、`Immersive`、`Interact`、`Journal`、`Inventory` | 见下表 |
 | `Dialogue` | `Advance`、`Auto`、`Speed`、`Skip`、`History`、`Choice1`~`Choice4` | 见下表 |
 | `UI` | Input System 默认的 UI 动作（Navigate / Submit / Cancel / Point / Click / ScrollWheel / MiddleClick / RightClick / TrackedDevice*） | 默认键鼠 + 手柄 + 触屏 |
 
@@ -809,6 +819,7 @@ var rules = new SampleRules(config, telemetry.Scope("sample"));
 | `Immersive` | H | 右摇杆按下 |
 | `Interact` | E、F | `buttonSouth` |
 | `Journal` | Tab | `select` |
+| `Inventory` | B | `rightShoulder`（背包面板；与 Dialogue 图的 `Skip` 同键但两图互斥） |
 
 `Confirm` 是 UI 层确认，`Interact` 是场景内可交互物的触发；两者键位不同但手柄都用 `buttonSouth`（互斥场景下不冲突：Confirm 只在对话/菜单等 UI 语境响应，Interact 只在自由探索响应）。触屏目前只有 `Confirm`（`primaryTouch/tap`）一条 `.inputactions` 绑定；虚拟摇杆与走跑等按钮已在 `ExplorationHudView` 里实现并模拟同一套手柄路径，仅触屏平台显示（PC 阶段不显示，移植阶段启用）。
 
@@ -929,6 +940,8 @@ Dynamic 按需栅格化，首帧用到几个字就只烘几个。加字重或换
 - **设置面板**：任何地方要开设置就注入 `SettingsController` 调 `await settingsController.OpenAsync()`（标题界面的「设置」按钮就是这样调的）。音量滑条拖动实时生效；分辨率 / 全屏模式 / 垂直同步 / 帧率上限只记值，点「应用」才生效并存盘；「返回」或 Esc 时未应用的改动全部回滚（音量也回滚）。回滚规则在 `SettingsEditSession`，有 `SettingsEditSessionTests` 钉着。显示区在触屏为主的平台整块隐藏；语言下拉只有「简体中文」且禁用（占位）。
 - **自己的面板要让 Esc 能关**：保持 `CloseOnCancel` 为 true（Panel / Popup 默认），并照 `QuestPanelController` / `PauseMenuController` 的写法，在面板的 `OnCloseAsync` 里抛一个 `OnClosed` 事件，控制器收到后收尾（释放暂停令牌、恢复输入图）——被 Esc 从外部关掉时控制器不会走自己的 `CloseAsync`。
 - **退出游戏**：统一调 `GameQuit.Quit("来源")`（`Core/Boot/GameQuit.cs`），不要自己写 `Application.Quit()`。要在退出前做异步收尾（如最后一次存档）就 `GameQuit.RegisterBeforeQuit(async () => { ... })`，把返回的句柄在自己 `Dispose` 时释放；钩子按登记顺序执行，总共最多等 2 秒，抛异常只记 Error 不挡退出（直接关窗口不经过这里）。
+- **二次确认弹窗**：用 Core 的 `ConfirmView`：`var v = await ui.OpenAsync<ConfirmView>(new ConfirmRequest("正文", "确认", "取消"), ct); bool ok = await v.WaitAsync(ct); await ui.CloseAsync(v, ct);`，Esc / 被关都按取消返回 false。
+- **选槽面板**：`Game.Session.SaveSlotsView`（`Prefabs/UI/SaveSlotsView.prefab`）是标题「继续 / 选择存档 / 开始（无空槽时）」共用的面板，会话逻辑在 `SaveSlotsController`；面板本身只显示三行槽位信息与抛点击 / 删除 / 返回事件，覆盖与删除都经 `ConfirmView` 二次确认。
 
 ## 12. 音频
 

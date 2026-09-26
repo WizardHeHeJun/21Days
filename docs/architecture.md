@@ -124,6 +124,10 @@ public sealed class GameLifetimeScope : LifetimeScope   // 注册全部 Core 服
 - 用 MessagePipe 的 `IPublisher<T>` / `ISubscriber<T>`；事件类型是 `readonly struct`，命名 `XxxEvent`。
 - 订阅返回的 `IDisposable` 必须挂到作用域或 `DisposableBag`，禁止裸订阅。
 - 全局事件在根作用域注册；模块内部事件在模块子作用域注册。
+- 框架层全局事件（`Core/Events/`，`GameLifetimeScope` 注册 broker）：`BootCompletedEvent`、`GameStateChangedEvent`、`HudVisibilityChangedEvent`、`TitleStartClickedEvent`，以及：
+  - `GameStateChangingEvent(From, To)`：状态即将切换，`GameFlow` 在前一状态 `ExitAsync` 之前发布（首次进入 From 为 null），订阅者同步抓现场用。
+  - `TitleContinueClickedEvent`：标题「继续」被点，`TitleState` 发布，去向由玩法层（存档会话）决定。
+  - `TitleLoadClickedEvent`：标题「选择存档」被点，`TitleState` 发布，选槽面板归玩法层。
 
 ### 5.3 资源
 
@@ -175,7 +179,7 @@ public interface IGameFlow
 }
 ```
 
-切换串行执行：先 Exit 当前再 Enter 目标；切换中再次请求切换则排队。切换完成后发布一次 `GameStateChangedEvent(from, to)`，切换前不发。内置 `BootState`、`TitleState`；玩法状态由 `Game.Runtime` 注册。
+切换串行执行：先 Exit 当前再 Enter 目标；切换中再次请求切换则排队。切换完成后发布一次 `GameStateChangedEvent(from, to)`，切换前不发；另在前一状态 `ExitAsync` 之前发布一次 `GameStateChangingEvent(from, to)`（首次进入也发，From 为 null），顺序恒为 Changing → Exit → Enter → Changed，目标 Enter 失败时只有 Changing 没有 Changed。内置 `BootState`、`TitleState`；玩法状态由 `Game.Runtime` 注册。存档会话用 `GameStateChangingEvent` 在离开玩法状态前同步捕获现场并保存（见 5.7），这时前一状态的场景与对象都还没释放，等 `GameStateChangedEvent` 发出来抓就晚了。
 
 ### 5.6 UI
 
@@ -208,7 +212,7 @@ public interface IUIService
 
 通用通知走 `INotificationService.Show(string title, string body = null, float seconds = 0f)`（`NotificationService` 实现，根作用域单例、**不是** `IGameService`）：按调用顺序排队逐条显示，`seconds ≤ 0` 取 `UIConfig.NotificationSeconds`（默认 2.5），计时用 unscaled 时间（世界暂停也照走）；待显示队列里同标题的一条会被合并替换。首次 `Show` 时才 `OpenAsync<NotificationView>()`（Top 层常驻、不全屏、卡片不挡点击），队列逻辑在纯 C# 的 `NotificationQueue`（EditMode 可测），视图只管 `ShowCard / HideCard` 的进出场动画。玩法模块只调 `Show`，不自己开 `NotificationView`。
 
-暂停菜单：`PauseMenuController`（Core 根作用域入口点，注册在 `UICancelRouter` 之后）在 `BootCompletedEvent` 后订阅 `UICancelRouter.OnCancelWithNothingToClose`（Esc）与 `Gameplay/Pause.performed`（P / 手柄 Start），满足 `ShouldOpen`（启动完成、不在沉浸、当前状态不是 `BootState` / `TitleState`、没开着）才开 `PauseMenuView`（Panel 层全屏、Esc 可关）；开着期间持 `IWorldPauseService` 令牌并关 Gameplay 图，继续 / Esc / 外部关闭统一收尾（释放令牌，进来前 Gameplay 图开着才恢复）。「回标题」先关菜单再 `GoToAsync<TitleState>()`，「退出游戏」在触屏为主的平台隐藏。标题界面：`TitleState` 除转发「开始」外，「设置」直接调 `SettingsController.OpenAsync()`，「退出游戏」调 `GameQuit.Quit()`（`Core/Boot/`，暂停菜单的退出同一实现；编辑器里退出 Play、出包后 `Application.Quit()`），退出按钮在触屏为主的平台隐藏。设置面板：`SettingsController`（根作用域单例）`OpenAsync()` 取 `ISettingsService.Snapshot()` 作回滚点再开 `SettingsView`；音量滑条实时 `ApplyAudio()`，显示项只改 `Current`，「应用」才 `ApplyDisplay()` + `SaveAsync()`；「返回」/ Esc / 外部关闭时若有未应用改动则 `Restore(snapshot)`（音量一并回滚）。回滚规则在纯 C# 的 `SettingsEditSession`（EditMode 可测）。
+暂停菜单：`PauseMenuController`（Core 根作用域入口点，注册在 `UICancelRouter` 之后）在 `BootCompletedEvent` 后订阅 `UICancelRouter.OnCancelWithNothingToClose`（Esc）与 `Gameplay/Pause.performed`（P / 手柄 Start），满足 `ShouldOpen`（启动完成、不在沉浸、当前状态不是 `BootState` / `TitleState`、没开着）才开 `PauseMenuView`（Panel 层全屏、Esc 可关）；开着期间持 `IWorldPauseService` 令牌并关 Gameplay 图，继续 / Esc / 外部关闭统一收尾（释放令牌，进来前 Gameplay 图开着才恢复）。「回标题」先关菜单再 `GoToAsync<TitleState>()`，「退出游戏」在触屏为主的平台隐藏。标题界面：`TitleState` 除转发「开始」外，「设置」直接调 `SettingsController.OpenAsync()`，「退出游戏」调 `GameQuit.Quit()`（`Core/Boot/`，暂停菜单的退出同一实现；编辑器里退出 Play、出包后 `Application.Quit()`；退出前先按登记顺序 await `GameQuit.RegisterBeforeQuit(Func<UniTask>)` 登记的钩子，单个钩子抛异常只记 Error，总共最多等 2 秒，重复 `Quit` 只执行一次；执行器是纯类 `GameQuitHooks`），退出按钮在触屏为主的平台隐藏。「继续」「选择存档」同「开始」只转发成 `TitleContinueClickedEvent` / `TitleLoadClickedEvent`，`TitleView.SetContinueEnabled(bool)` 由玩法层按有无可用存档调用。通用二次确认：`ConfirmView`（`Core/UI/Views/`，Popup、Esc 可关）以 `ConfirmRequest`（正文 + 两个按钮文字）打开，`WaitAsync(ct)` 确认 true，取消 / 被关 / ct 取消 false，关闭由调用方负责。设置面板：`SettingsController`（根作用域单例）`OpenAsync()` 取 `ISettingsService.Snapshot()` 作回滚点再开 `SettingsView`；音量滑条实时 `ApplyAudio()`，显示项只改 `Current`，「应用」才 `ApplyDisplay()` + `SaveAsync()`；「返回」/ Esc / 外部关闭时若有未应用改动则 `Restore(snapshot)`（音量一并回滚）。回滚规则在纯 C# 的 `SettingsEditSession`（EditMode 可测）。
 
 Esc 优先级（H11，一次 Esc 只做第一条命中的事；P 键只开不关）：
 
@@ -229,6 +233,7 @@ public interface ISaveService
     T Get<T>() where T : class, ISaveData, new();   // 按类型取分区，首次访问创建
     UniTask<bool> SaveAsync(int slot, CancellationToken ct = default);
     UniTask<bool> LoadAsync(int slot, CancellationToken ct = default);
+    void ResetAll();                                 // 丢弃全部内存分区（新游戏），不碰磁盘；与 LoadAsync 一样整体替换，服务不得缓存分区实例
     bool Exists(int slot);
     void Delete(int slot);
 }
@@ -256,6 +261,19 @@ public interface ISettingsService
 **独立档案也走版本信封与 `Migrate`**：`ReadProfileAsync / WriteProfileAsync` 的 `T` 实现 `ISaveData` 时，文件写成 `{ "version": N, "data": {...} }`；读时没有信封的旧裸对象按版本 1，存的版本低于代码版本调一次 `Migrate(stored)`，高于代码版本记 Error 并返回默认值（文件原样保留，与槽位分区「高版本拒绝」一致）；非 `ISaveData` 的 `T` 仍按裸对象读写。决定（2026-09-26）：旧存档槽里的设置分区**不做一次性搬运**（尚无真实玩家存档）。
 
 `SettingsService` 注册在 `JsonSaveService` 之后、`AudioService` 之前：启动时读档案（没有就默认、越界值纠正）并 `ApplyDisplay()`；`AudioService` 构造注入 `ISettingsService`，音量读写的就是 `Current`（setter 立即生效、不落盘）。换算规则在纯 C# 的 `DisplaySettingsMath`，Unity 显示 API 收在 `IDisplayBackend`（EditMode 测试换假实现，不真改编辑器分辨率）。窗口：`PlayerSettings` 默认 1920×1080、`FullScreenWindow`、`resizableWindow = 1`（窗口化可拖拽）。
+
+**存档会话契约**（实现在 Runtime 层，`Game.Session`，框架只提供上面这套分区 / 独立档案接口）：全状态记录、即存即用——没有节点式存档，关键节点触发一次把当前内存里的全部分区写入当前槽。分区所有者各管各的，`ISaveService` 不知道任何分区的字段语义：
+
+| 分区 | 所有者 | 进槽位还是独立档案 |
+| --- | --- | --- |
+| `SettingsSaveData` | `SettingsService` | 独立档案 `settings`（本节上文） |
+| 槽位元数据 | 存档会话自身 | 槽位分区，`Contains<T>()` 判断该槽是否可用 |
+| 任务 / 拾取 / 遭遇（含玩家）等玩法分区 | 各自模块的门面服务 | 槽位分区，随槽读写 |
+| 对白已读记录 | 对白模块 | **独立档案**（`dialogue-read`），不进槽——已读是跨局的玩家档案，不该被「新游戏」清空，也不该因为读了旧槽而倒退 |
+
+判断一份数据该进槽位还是独立档案，看它是不是「这一局游戏特有的进度」：是→槽位分区；「跨局都保留、且与某一局无关」（设置、已读记录这类）→独立档案。
+
+落盘时机上不是「有变化就存」，而是在**稳定边界**触发：处于玩法状态、没有进行中的对白、没有打开的面板 / 弹窗、没有待消费的关键结算时才允许落盘，命中关键节点（如某个业务事件、离开玩法状态、退出游戏）但边界不满足时请求会排到下一次满足边界时合并成一次。`ResetAll()`（新游戏）与 `LoadAsync`（读档）一样是整体替换分区字典：任何服务都不得跨帧持有分区实例，每次用 `Get<T>()` 现取；读档 / 新游戏后各分区所有者靠 Runtime 层的一个「会话已开始」事件驱动自己重新加载，`ISaveService` 本身不发这类事件（它不认识"会话"这个概念）。
 
 ### 5.8 输入、定时器、池、日志、音频、平台
 

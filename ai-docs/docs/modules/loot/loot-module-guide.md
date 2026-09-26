@@ -77,7 +77,7 @@ maturity: stable
 | 玩家标记 | 玩家根挂 `DialogueInteractionActor`（复用对话模块） | 无标记：`SupplyCrateFocus` 永远没有焦点 |
 | 入口 | 从 Boot → 标题「开始」进场景才有 `LootService` | 直接 Play 玩法场景：任务上报会跳过并记 Warn（`quest.IsReady == false`） |
 
-示例接线：`Assets/Scenes/SampleScene.unity` 的 `Crates` 根节点下 `Crate_A`（营地，itemId 1001 铁剑 ×1）、
+示例接线：`Assets/Scenes/SampleScene.unity` 的 `Crates` 根节点下 `Crate_A`（营地，itemId 1005 破旧信笺 ×1，线索；B1 背包白盒由 1001 改来）、
 `Crate_B`（瞭望点，itemId 1002 精钢长剑 ×1）、`Crate_C`（灰盒另一角，itemId 1004 治疗药水 ×2）；支线 `Tables/Data/quest/2002.json`
 （Counter key `crate` × 3）用同一个 `CrateQuestKey` 上报。
 
@@ -99,7 +99,7 @@ maturity: stable
 
 ## 已知约束 / 未做
 
-- 没有背包面板：`LootService.Items` 是只读字典，UI 由以后的面板消费。
+- 背包面板在 Inventory 模块：`InventoryPanelController` 读 `LootService.Items` + 物品表，开着时订阅 `CrateCollectedEvent` / `LootResetEvent` 刷新（见 `inventory-module-guide.md`）；本模块不认识面板。
 - 没有落盘存档：分区只活在内存，进程重启即丢；游戏级读写盘归 roadmap E1。
 - 奖励种类单一：只有「tbitem id × 数量」，没有稀有度、词条等扩展字段。
 

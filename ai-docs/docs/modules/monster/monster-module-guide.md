@@ -26,7 +26,6 @@ Monster 在遭遇场景中沿巡逻点移动，感知 Player，累积或消退�
 | 白盒碰撞 | `EncounterCollision` | 静态：玩家场景位移先 X 后 Z 胶囊扫掠（贴墙滑动），表现层用，不进确定性内核 |
 | 独立场景入口 | `StandaloneEncounterController` | 直接播放原型场景时读取输入并推进同一套遭遇规则 |
 | 根注册 | `MonsterInstaller` | 玩法逻辑步骤和回放状态接线 |
-| 标题入口 | `MonsterTitleRouter` | 标题“开始”事件切到遭遇 |
 
 Monster 与 Player 均在 `Game.Runtime` 程序集。Monster 依赖 Player 的公开快照与伤害意图。
 Game.Core 不引用玩法模块；规则类不读取场景组件、不用 `Time.deltaTime` 或全局随机数。
@@ -106,7 +105,7 @@ Boot `GameBootstrap` 已挂 `PlayerInstaller` 和 `MonsterInstaller`，并已移
 占位表现以玩家蓝/青/绿和怪物灰/橙/红/黑区分状态（状态色优先染 `playerStateIndicator` /
 `monsterStateIndicator` 指示环，当前场景接线为脚下 `SelectRing`；为空才回退染本体纸片），并显示
 生命与警戒条。
-标题入口由 `MonsterTitleRouter` 订阅 `TitleStartClickedEvent`；同一事件不应同时留给 Sample 路由。
+标题「开始」由存档会话路由（`Game.Session`）接管。
 
 `EncounterSceneView.ToScenePosition`（`EncounterSceneView.cs:227`）在 XZ 模式下额外做贴地投影：
 `groundMask` 非 0 时，从 `当前 Y + groundProbeHeight` 向下 Raycast（`QueryTriggerInteraction.Ignore`），
@@ -152,8 +151,13 @@ EditMode `EncounterStepTests` 的 `CorrectPlayerPosition_WhenActive_OverridesPla
 | `obstacleRadius` | 0.3 | 胶囊半径，与 player 的 CapsuleCollider 一致 |
 | `obstacleTeleportDistance` | 1.5 | 单帧场景位移超过它视为瞬移（读档 / 重置 / 回放挪位），不解算只贴地 |
 
-调试文字（`OnGUI`，玩家 / 怪物状态两行 + 警戒条）波 9 起挪到右上「返回标题」按钮下方、右对齐（y 64 / 92 / 124），
-让出左上角给任务栏 HUD；按钮位置不变。
+调试块（`OnGUI`，返回标题按钮 + 玩家 / 怪物状态两行 + 警戒条）波 12 起挪到**左下角**、左对齐、像素坐标
+（不随画布缩放）：按钮 `Rect(16, Screen.height − 56, 114, 40)`，两行状态文字在按钮上方
+（`y = Screen.height − 56 − 28 − 28` 与 `− 56 − 28`，宽 480），警戒条再上方
+（`y = Screen.height − 56 − 28 − 28 − 24`）。挪到左下角是为了把右上角一列让给
+`Game.IsometricExploration` 的沉浸 / 重置按钮（见 `isometricexploration-module-guide.md` 的
+「探索 HUD 与沉浸模式」）。`Time.timeScale <= 0f`（对白 / 面板暂停期间）整块不画，避免压在对话框
+或暂停面板上；不再使用右对齐 `GUIStyle`，`rightAlignedLabel` 字段已删除。
 
 `PlayerScenePosition`（`EncounterSceneView.cs:51`）暴露玩家纸片贴地后的场景坐标，供 Showcase 与
 跨模块只读取用，不需要碰视图私有字段。

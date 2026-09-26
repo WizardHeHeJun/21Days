@@ -25,7 +25,7 @@ maturity: stable
 | 不做 | 归属 |
 | --- | --- |
 | 遭遇触发（什么时候、对谁自动开对白）、剧情阶段推进、选项结果驱动的玩法行为 | Narrative 后续接线（[`follow-up-integration.md`](../../../../PRP/narrative-dialogue/follow-up-integration.md) 第 4 节） |
-| 存读档 UI、槽位、候选读取事务；已读档案持久化 | Narrative / GameSession 后续（同上第 6 节） |
+| 存读档 UI、槽位、候选读取事务 | Narrative / GameSession 后续（同上第 6 节）；已读档案持久化已由本模块 `DialogueReadStore` 自己做（独立档案，不经 Session） |
 | 条件事实的真实来源（玩家是否潜行、剧情标记……） | Narrative 接线后替换 `IDialogueConditionSource` |
 
 > `follow-up-integration.md` 第 3 节写于本模块落地前，其中「三槽立绘」「`advance` 按钮」「已读快进 Toggle」
@@ -60,7 +60,8 @@ maturity: stable
 | `DialogueInstaller` | `GameplayInstaller`：注册以上全部 | Boot 场景 `GameBootstrap` 物体 |
 | `DialogueConfig` | SO：打字速度、历史上限、倍速档、三连点、自动间隔 | `Data/Dialogue/DialogueConfig.asset` |
 | `DialogueSaveData` | `ISaveData`：对白稳定恢复点（节点、阶段、解析后文本、历史、立绘） | `rules.Capture()` 产出；**尚未接存档** |
-| `DialogueReadData` | 跨槽位已读键集合，**故意不实现 `ISaveData`**（加载旧槽位不能让已读倒退） | 本期内存单例（`DialogueInstaller.cs:38`） |
+| `DialogueReadData` | 跨槽位已读键集合，**故意不实现 `ISaveData`**（加载旧槽位不能让已读倒退） | 根作用域单例（`DialogueInstaller.cs:41`），由 `DialogueReadStore` 原地填充 |
+| `DialogueReadStore` / `DialogueReadProfile` | 已读记录的**独立档案 `dialogue-read`**（`profile-dialogue-read.json`，不进槽位）：`InitializeAsync` 读档案并把键**并集**灌进 `DialogueReadData` 同一实例；订阅 `DialogueService.OnEnded` 标记脏，下一帧合并成一次 `WriteProfileAsync`（同帧多次结束只写一次，写失败记 Error 留脏待下次）；`Dispose` 退订并补写（`Forget`，退出时可能来不及落盘）。`DialogueReadProfile` 是落盘 DTO（`ISaveData` v1，`List<string> Keys`） | `IGameService`，排在 `DialogueService` 之后（`DialogueInstaller.cs:69`） |
 | `DialogueIntent` | View → Controller 的意图（`Advance / Choose`），带 `Generation / Visit` 身份防迟到回调 | 现 new 现用 |
 | `DialogueResult` / `DialogueStartedEvent` / `DialogueChoiceSelectedEvent` / `DialogueEndedEvent` | 返回值与三个广播载荷（`readonly struct`，一文件一个） | Service 产出 |
 
@@ -310,6 +311,7 @@ Controller、View、Rules、Focus、键位入口、气泡一律不碰 `Time.time
 | EditMode | `.../DialogueCatalogTests.cs`（8 条） | 读真实 `.bytes`：1001 / 1002 结构、立绘指令、每个表情有地址、条件选项、选项图标键 |
 | EditMode | `.../DialogueInteractableTests.cs`（14 条，含参数化） | 三维距离判范围、无树台词按序循环、有树未绑定 / 无树无台词不可交互、`SelectNearest` 跳过超范围；交互提示键位显示串为空回退「E」、「对话 · 名字」拼接 |
 | EditMode | `Assets/_Project/Scripts/Tests/EditMode/Dialogue/DialogueServiceTests.cs`（6 条） | 进行中重入抛 `InvalidOperationException`；未知 id 抛 `ArgumentException` 且不碰暂停 / 输入；Present 异常时清理并发 `OnEnded`；对白期间 Dialogue 图开、Gameplay 图关，取消 / 异常后对称恢复，进来前关着的 Gameplay 不被打开 |
+| EditMode | `.../DialogueReadStoreTests.cs`（3 条） | 空档案读入为空；写 3 个键后新 store 读回一致且原地填充同一实例；同帧两次对白结束只写一次（计数 `ISaveService` 装饰器包临时目录 `JsonSaveService`） |
 | EditMode | `.../DialogueKeyboardInputTests.cs`（9 个方法 / 30 例） | 键位映射：主面板各键、未激活 / 未就绪忽略、选项期 Advance 忽略、Choice N 越界 / 不可用 / 空行忽略、历史与跳过确认期只放行弹窗键 |
 | EditMode | `Assets/_Project/Scripts/Tests/EditMode/Core/WorldPauseServiceTests.cs` | 暂停引用计数与 timeScale 恢复（Core 侧） |
 | Showcase | `Assets/_Project/Scripts/Tests/Showcase/Dialogue/DialogueShowcase.cs`（6 条） | 交互 → 打字 → 选项 → 结束且全程时停；跳过（经确认）停在选项；点击旅人拉起 1002；`SkipCancelled_DialogueContinues`；`Focus_ShowsHudButton_AndHudClickStartsDialogue`；`Bubble_ShowsAboveHead_WithoutPausing` |
@@ -326,7 +328,7 @@ Controller、View、Rules、Focus、键位入口、气泡一律不碰 `Time.time
 - **常驻台词未进表**：`bubbleLines` 在 Inspector 配，不走 Luban、未本地化。
 - **`FallbackCamera` 只在场景加载 / 卸载时判断**：玩法场景加载后才启用的相机不会让它让位。
 - 对白与美术装饰（手绘边框、贴纸、背景模糊）仍是占位（PRP 8.4）。
-- **已读档案未持久化**：`DialogueReadData` 是内存单例，重启清空；接存档时在 Installer 换成读出的实例。
+- **已读记录走独立档案 `dialogue-read`**：启动读入、对白结束写出（`DialogueReadStore.cs`）；只在对白结束时落盘，对白进行中强退会丢这一段的已读键。
 - **存读档未接**：`Capture / Restore` 与 `DialogueSaveData` 已有且有测试，但没有调用方；`Preparing` 阶段不能 `Capture`。
 - **`DefaultDialogueConditionSource` 是占位**：所有正向事实为真、无剧情标记，所以依赖 `StoryFlag` 的选项
   （如 1001 的第三个选项）当前永远不可用。Narrative 接线后替换注册并删掉本类。
