@@ -21,6 +21,15 @@
 接入游戏一列的依据是 `Boot.unity` 里挂了哪些 Installer：当前已提交版本挂了 Dialogue、Monster、Player、Quest 四个；Exploration 的 Installer 在工作区接线中、尚未提交。
 各模块说明按 2026-09-26 的工作区写成，其中走 / 跑切换、沉浸模式、探索 HUD、任务接取 / 完成通知、支线 2002、对白键盘 / 手柄操作（交互键改 E / F）与 Esc 关面板属于另一会话尚未提交的改动，以实际合入为准；合入后把这句删掉。
 
+## 场景与界面状态
+
+| 场景 / 界面 | 性质 | 说明 |
+| --- | --- | --- |
+| `Assets/_Project/Scenes/Boot.unity` + `TitleView` | **正式（当前唯一）** | 标题 / 登录页：功能正式（开始游戏 / 设置 / 退出游戏 / 版本号），美术占位，替换清单见[美术手册 6.10](../artist-guide.md) |
+| `Assets/Scenes/SampleScene.unity`（Addressables 地址 `IsometricEncounter`） | 非正式 | 探索白盒 / 灰盒 |
+| `Assets/_Project/Scenes/Verify/*.unity` | 非正式 | 模块回放验证场景，只给 `/verify-module` 跑 |
+| `Assets/_Project/Scenes/Sample.unity`、`MonsterEncounter.unity` | 非正式 | 早期样板与遭遇原型 |
+
 ## 怎么维护
 
 - 新模块落地时在本表补一行，并照 [player.md](player.md) 的七节骨架写一份策划说明；模块规则或可调项变了要同步改对应文件。

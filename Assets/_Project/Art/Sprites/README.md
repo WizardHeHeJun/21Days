@@ -10,6 +10,7 @@
 
 **子目录**：`Characters/` 角色纸片，贴图 **Pivot 设为 Bottom**（根节点对齐脚底），配套材质见
 `Art/Materials/Character/`；`Fx/` 脚下贴片（`BlobShadow`、`SelectRing` 等）与其它特效图；`Dialogue/` 对话相关立绘/图标。
+`UI/` 界面切图（导入后手动关 mipmap；`UI/Title/` 是标题页占位图，替换清单见美术手册 6.10）。
 
 **命名**：全小写 + 下划线，`类别_名字_状态`，例如 `ui_btn_start_normal.png`、`chr_player_idle_01.png`。
 不用空格、不用中文。

@@ -869,8 +869,9 @@ Dynamic 按需栅格化，首帧用到几个字就只烘几个。加字重或换
 两个面板都在 `Core/UI/Views/`，预制体 `Prefabs/UI/PauseMenuView.prefab`、`Prefabs/UI/SettingsView.prefab`（Addressables `UI` 组，地址 = 类名），会话逻辑在控制器里，面板本身只抛事件、不注入服务。
 
 - **暂停菜单**：`PauseMenuController`（根作用域入口点）自己接 Esc（`UICancelRouter.OnCancelWithNothingToClose`）与 P / 手柄 Start（`Gameplay/Pause`），**玩法不用写任何代码**。开着期间世界暂停（`IWorldPauseService` 令牌）、Gameplay 图关闭；「继续」/ Esc 关闭后恢复。按钮：继续、设置、回标题、退出游戏（手机上隐藏）。在标题 / 启动状态、沉浸模式、已有可关面板时不开。Esc 的完整优先级表见 `architecture.md` 5.6。
-- **设置面板**：任何地方要开设置就注入 `SettingsController` 调 `await settingsController.OpenAsync()`（标题界面将来的「设置」按钮同理）。音量滑条拖动实时生效；分辨率 / 全屏模式 / 垂直同步 / 帧率上限只记值，点「应用」才生效并存盘；「返回」或 Esc 时未应用的改动全部回滚（音量也回滚）。回滚规则在 `SettingsEditSession`，有 `SettingsEditSessionTests` 钉着。显示区在触屏为主的平台整块隐藏；语言下拉只有「简体中文」且禁用（占位）。
+- **设置面板**：任何地方要开设置就注入 `SettingsController` 调 `await settingsController.OpenAsync()`（标题界面的「设置」按钮就是这样调的）。音量滑条拖动实时生效；分辨率 / 全屏模式 / 垂直同步 / 帧率上限只记值，点「应用」才生效并存盘；「返回」或 Esc 时未应用的改动全部回滚（音量也回滚）。回滚规则在 `SettingsEditSession`，有 `SettingsEditSessionTests` 钉着。显示区在触屏为主的平台整块隐藏；语言下拉只有「简体中文」且禁用（占位）。
 - **自己的面板要让 Esc 能关**：保持 `CloseOnCancel` 为 true（Panel / Popup 默认），并照 `QuestPanelController` / `PauseMenuController` 的写法，在面板的 `OnCloseAsync` 里抛一个 `OnClosed` 事件，控制器收到后收尾（释放暂停令牌、恢复输入图）——被 Esc 从外部关掉时控制器不会走自己的 `CloseAsync`。
+- **退出游戏**：统一调 `GameQuit.Quit("来源")`（`Core/Boot/GameQuit.cs`），不要自己写 `Application.Quit()`。要在退出前做异步收尾（如最后一次存档）就 `GameQuit.RegisterBeforeQuit(async () => { ... })`，把返回的句柄在自己 `Dispose` 时释放；钩子按登记顺序执行，总共最多等 2 秒，抛异常只记 Error 不挡退出（直接关窗口不经过这里）。
 
 ## 12. 音频
 

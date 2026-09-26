@@ -259,19 +259,30 @@
   每行高 40（左侧标签字号 22、右侧控件宽 380）：音频三条滑条、`DisplaySection`（分辨率 / 全屏模式 / 垂直同步 / 帧率上限，手机上整块隐藏）、语言；
   底部 `ApplyButton` / `BackButton` 各 160×40。下拉框、滑条、开关都用 Unity 自带皮肤，换皮时**保留节点和脚本引用**，只改 Image 的图和颜色。
 
-`TitleView` 的真实结构长这样（在 Project 窗口里双击打开预制体就能看到）：
+`TitleView` 的真实结构长这样（在 Project 窗口里双击打开预制体就能看到；**这是工程当前唯一的正式场景界面**，详见 6.10 节）：
 
 ```
 TitleView                  ← 根节点：RectTransform（四角全拉伸，铺满父节点）
                              + CanvasGroup
-                             + TitleView 脚本（程序写的）
-  ├─ TitleLabel            ← TextMeshPro 文字，居中锚点，位置 (0, 180)，尺寸 900×200，字号 120
-  └─ StartButton           ← RectTransform 居中锚点，位置 (0, -120)，尺寸 240×44
-                             + Image（白色，底色写在 Button 的 Normal 色上）+ Button + UIButtonFeedback
-      └─ Label             ← TextMeshPro 文字「开始」，四角全拉伸铺满按钮，字号 24
+                             + TitleView 脚本（transition Fade；Default Selected = StartButton）
+  ├─ Background            ← Image：ui_title_bg（Simple、白色、不接收点击）；居中 1920×1080
+                             + AspectRatioFitter（Envelope Parent，16:9）——宽屏裁两侧不拉伸
+  ├─ Logo                  ← Image：ui_title_logo（Simple、Preserve Aspect、不接收点击）
+                             顶中锚点，位置 (0,-160)，720×240
+  │   └─ TitleLabel        ← TextMeshPro「21Days」，铺满 Logo，字号 120，居中
+  │                          （正式 logo 带字后由美术隐藏）
+  ├─ Buttons                ← 竖向布局（间距 16、居中、不控制子尺寸）+ ContentSizeFitter（垂直 Preferred）
+  │                          底中锚点，位置 (0,180)，宽 240
+  │   ├─ StartButton        Label「开始游戏」，字号 24
+  │   ├─ SettingsButton     Label「设置」
+  │   └─ QuitButton         Label「退出游戏」（触屏为主的平台由代码隐藏）
+  │        （三个按钮都是 Image：ui_btn_menu_normal（Sliced、白色）+ Button + UIButtonFeedback
+  │         + LayoutElement 240×44）
+  └─ VersionLabel           ← TextMeshPro，右下锚点，位置 (-24,16)，300×28，字号 18，右对齐，白色 70%
+                             文字由代码填 "v" + Application.version
 ```
 
-`SampleView` 是一模一样的骨架：根节点三件套 + 一个文字 + 一个按钮（按钮里再套一个文字标签）。
+`SampleView` 仍是最简骨架：根节点三件套 + 一个文字 + 一个按钮（按钮里再套一个文字标签）。
 
 ### 6.2 根节点必须是什么
 
@@ -373,7 +384,7 @@ NPC 头顶的「…」「!」标记是 `Marker_Idle.png` / `Marker_Focus.png`，
 
 | 项 | 基线 | 例子 |
 | --- | --- | --- |
-| 按钮高 | **36–44** | 对话右上「自动 / 倍速 / 跳过」120×36、LOG 100×36；弹窗按钮 160×40；标题「开始」240×44 |
+| 按钮高 | **36–44** | 对话右上「自动 / 倍速 / 跳过」120×36、LOG 100×36；弹窗按钮 160×40；标题页三个按钮 240×44 |
 | 按钮 / 正文字号 | **20–24** | 按钮文字 20–24；装不下的短按钮（带键位提示的）文字开「Auto Size」，上限 20–22、下限 14–16 |
 | 列表行高 | 44 | 任务面板左侧列表、对话选项胶囊（560×44） |
 | 悬停 / 选中 | **淡金** `(0.62, 0.50, 0.18)` | Button 的 Highlighted 与 Selected 同色；Pressed 为底色压暗 25%；Disabled 为 `(0.22, 0.22, 0.22, 50%)`；Fade Duration 0.08 |
@@ -382,6 +393,32 @@ NPC 头顶的「…」「!」标记是 `Marker_Idle.png` / `Marker_Focus.png`，
 **配色写法**：按钮的 `Image` 颜色保持**白色**，按钮底色写在 `Button` 组件 Colors 的 **Normal Color** 上
 （Unity 的 Color Tint 是「Image 颜色 × 状态色」，Image 若是深色，悬停的淡金乘上去几乎看不出来）。
 想换按钮底色就改 Normal Color，不要改 Image 颜色。
+
+### 6.10 标题页（登录页）：唯一的正式界面与占位资源替换清单
+
+`TitleView`（`Assets/_Project/Prefabs/UI/TitleView.prefab` + `Assets/_Project/Scripts/Core/UI/Views/TitleView.cs`，
+Addressables 地址仍是 `TitleView`）是**当前工程唯一的正式场景界面**：功能已经做完（开始游戏 / 设置 / 退出游戏 / 版本号都能用），
+**美术是占位**，结构见 6.1 节的结构树。换图不用找程序——三张占位图同名替换即生效。
+
+三张图都在 `Assets/_Project/Art/Sprites/UI/Title/`（导入设置：Sprite、Mip Maps 关、Bilinear、压缩 None、PPU 100，
+这几项和第 4 章的通用规则不同，因为是界面切图不是场景纸片）：
+
+| 文件 | 尺寸 | 内容 | 九宫格（Border） |
+| --- | --- | --- | --- |
+| `ui_title_bg.png` | 1920×1080 | 深色竖向渐变背景 | 无 |
+| `ui_title_logo.png` | 720×240 | 圆角半透明浅色底板 + 描边 | 无 |
+| `ui_btn_menu_normal.png` | 64×64 | 纯白圆角矩形，底色靠 Button 的 Normal Color 着色（见上一节「配色写法」） | (20,20,20,20) |
+
+**替换规则**：
+
+- 同名覆盖 PNG 即可，不用改预制体、不用找程序。
+- 换按钮图要保持**白底**（颜色由 Button 组件的状态色乘上去）。
+- 正式 Logo 如果自带文字，把 `Logo` 下的 `TitleLabel` 隐藏（不要删）。
+- 想换尺寸，只改对应节点的 RectTransform / LayoutElement，别改节点名。
+- **不要**改节点名、不要删按钮、不要动 `TitleView` 脚本上的 5 个引用（`titleLabel` / `startButton` / `settingsButton` / `quitButton` / `versionLabel`）——模块回放场景靠 `StartButton` 这个节点名点「开始」。
+
+**还没做的**：「继续 / 选择存档」按钮——要等存档系统的当前槽、自动保存、槽位元数据落地后才能加，
+到时候会在 `Buttons` 这个布局组里追加两个按钮，美术不用重做现有三张图。
 
 ## 7. 分辨率与安全区
 
