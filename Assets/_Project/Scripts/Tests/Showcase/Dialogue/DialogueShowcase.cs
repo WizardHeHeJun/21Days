@@ -23,6 +23,9 @@ namespace Game.Tests.Showcase.Dialogue
     {
         private const float BootTimeoutSeconds = 20f;
 
+        /// <summary>预制体 PortraitLeft 的原位 x（入场终点）；入场中 x 小于它。</summary>
+        private const float PortraitLeftRestX = 40f;
+
         /// <summary>根作用域类型名：Boot 场景的 GameBootstrap 带 DontDestroyOnLoad，收尾时按名字找来销毁。</summary>
         private const string ScopeTypeName = "Game.Core.Boot.GameLifetimeScope, Game.Core";
 
@@ -299,6 +302,102 @@ namespace Game.Tests.Showcase.Dialogue
             yield return Snapshot("村民气泡·第二句");
             yield return Check("停留后气泡淡出消失", () => !bubble.IsShowing, bubble.HoldSeconds + 2f);
             yield return Snapshot("气泡淡出");
+        }
+
+        [UnityTest]
+        public IEnumerator Portraits_SlideInCrossfadeAndDimNonSpeaker()
+        {
+            Connect();
+            yield return CloseTitleIfOpen();
+
+            var elder = FindRequired<DialogueInteractable>("Elder");
+            yield return Step("点长者：拉起对白 1001，长者立绘从左侧滑入", () =>
+            {
+                elder.OnCompleted -= RecordResult;
+                elder.OnCompleted += RecordResult;
+                elder.Interact();
+            }, hold: 0f);
+            // 入场只有 0.25 s：不停顿直接逐帧轮询「正在入场」的瞬态（半透明，或还在预制体原位 x=40 的左侧）；
+            // 超时给 3 s 是等面板与立绘加载，条件本身只在入场那几帧成立。
+            yield return Check("左槽立绘正在入场（透明度介于 0～1，或还没滑到原位）", () =>
+            {
+                Image left = FindInView<Image>("PortraitLeft");
+                if (left == null || !left.enabled || left.sprite == null) return false;
+                float alpha = left.color.a;
+                return (alpha > 0f && alpha < 1f) || left.rectTransform.anchoredPosition.x < PortraitLeftRestX - 0.5f;
+            }, 3f);
+            yield return Snapshot("长者入场中");
+
+            yield return AdvanceTo("l2");
+            yield return Check("右槽出现旅人，左槽长者压暗（颜色明显偏离白色）", () =>
+            {
+                Image left = FindInView<Image>("PortraitLeft");
+                Image right = FindInView<Image>("PortraitRight");
+                return right != null && right.enabled && right.sprite != null && right.color.a > 0.99f
+                       && left != null && left.enabled && ColorDistanceFromWhite(left.color) > 0.3f;
+            }, 2f);
+            yield return Snapshot("旅人说话·长者压暗");
+
+            yield return AdvanceTo("l3");
+            yield return Check("长者恢复高亮、旅人压暗", () =>
+            {
+                Image left = FindInView<Image>("PortraitLeft");
+                Image right = FindInView<Image>("PortraitRight");
+                return left != null && ColorDistanceFromWhite(left.color) < 0.05f
+                       && right != null && ColorDistanceFromWhite(right.color) > 0.3f;
+            }, 2f);
+            yield return Snapshot("长者说话·旅人压暗");
+
+            // 1001 的 l3 与 l1 同为 angry；c1（选项节点，expression 空 = 默认表情）才换表情，交叉淡化在这里验。
+            yield return AdvanceTo("c1");
+            yield return Check("左槽交叉淡化中：残影显示旧表情，主图已换新表情", () =>
+            {
+                Image ghost = FindInView<Image>("PortraitLeftGhost");
+                Image left = FindInView<Image>("PortraitLeft");
+                return ghost != null && ghost.enabled && ghost.sprite != null && left != null && left.sprite != null
+                       && ghost.sprite != left.sprite;
+            }, 2f);
+            yield return Snapshot("长者换表情·交叉淡化中");
+            yield return Check("交叉淡化结束：残影隐藏，主图不透明", () =>
+            {
+                Image ghost = FindInView<Image>("PortraitLeftGhost");
+                Image left = FindInView<Image>("PortraitLeft");
+                return ghost != null && !ghost.enabled && left != null && left.color.a > 0.99f;
+            }, 1f);
+            yield return Snapshot("长者新表情·选项");
+
+            yield return Step("开自动并选择第二项「拒绝」，自动播完收尾", () =>
+            {
+                RequireButton("AutoButton").onClick.Invoke();
+                ClickChoice(1);
+            });
+            yield return Check("对白结束，世界恢复",
+                () => !service.IsRunning && hasResult && WorldRestored(), 15f);
+            elder.OnCompleted -= RecordResult;
+        }
+
+        /// <summary>把当前句补全（打字中连点三下）再单点推进，直到进入 <paramref name="nodeId"/>；推进那一步不停顿，好抓入场 / 淡化瞬态。</summary>
+        private IEnumerator AdvanceTo(string nodeId)
+        {
+            if (rules.Phase == DialogueSaveData.Phase.Typing)
+            {
+                yield return Step("连点三下补全当前句", () =>
+                {
+                    Button tap = RequireButton("TapArea");
+                    tap.onClick.Invoke();
+                    tap.onClick.Invoke();
+                    tap.onClick.Invoke();
+                }, hold: 0f);
+            }
+
+            yield return Check("当前句已整句显示", () => rules.Phase == DialogueSaveData.Phase.AwaitAdvance, 3f);
+            yield return Step($"单点推进到 {nodeId}", () => RequireButton("TapArea").onClick.Invoke(), hold: 0f);
+            yield return Check($"进入 {nodeId}", () => CurrentIs(nodeId), 2f);
+        }
+
+        private static float ColorDistanceFromWhite(Color color)
+        {
+            return Mathf.Abs(1f - color.r) + Mathf.Abs(1f - color.g) + Mathf.Abs(1f - color.b);
         }
 
         /// <summary>从根容器取本回放要用的服务；取不到留 null，由后续检查点记失败。</summary>

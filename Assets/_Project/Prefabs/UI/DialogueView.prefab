@@ -604,7 +604,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 70b7ac73a8c2e004b85d281d0d478e6d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  transition: 0
+  transition: 1
   defaultSelected: {fileID: 0}
   speaker: {fileID: 3489823995289494641}
   body: {fileID: 8107703933979322584}

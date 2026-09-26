@@ -45,6 +45,10 @@ namespace Game.Dialogue
         // 可为 null：Boot 没挂 PerformanceInstaller 时节点插播跳过（记 Warn + 埋点），不阻塞对白。
         private readonly IPerformanceService performance;
         private readonly AssetHandle<Sprite>[] handles = new AssetHandle<Sprite>[DialogueContent.SlotCount];
+        // 上一节点的立绘句柄：换节点时不立刻释放，留到再下一次换节点 / 收尾——退场滑出与表情交叉淡化的残影还在显示旧图。
+        private readonly AssetHandle<Sprite>[] retiring = new AssetHandle<Sprite>[DialogueContent.SlotCount];
+        // 新节点立绘先全部加载到这里，再一次性交给 View，免得「先清槽再逐个加载」把每句都演成退场 + 入场。
+        private readonly AssetHandle<Sprite>[] loading = new AssetHandle<Sprite>[DialogueContent.SlotCount];
         // 选项图标：地址 → 句柄。键存在而值为 null 表示加载中或加载失败（不重复请求）；换节点 / 收尾时整体释放。
         private readonly Dictionary<string, AssetHandle<Sprite>> choiceIcons =
             new Dictionary<string, AssetHandle<Sprite>>(StringComparer.Ordinal);
@@ -71,7 +75,8 @@ namespace Game.Dialogue
         private CancellationToken presentToken;
         private bool inputConsumed;
         private bool ready;
-        private float characterProgress;
+        // 打字节奏（标点停顿）：每段对白按播放设置建一个，每句 Reset。
+        private DialogueTypingCadence cadence;
         private float lastChoiceRefresh;
         private bool[] availability;
         // 当前显示的选项行（顺序同界面，隐藏的不可用选项不在其中）：可用性与选项 id，供数字键按行号选择。
@@ -131,6 +136,8 @@ namespace Game.Dialogue
                 view.OnSpeed += CycleSpeed;
                 view.OnSkip += RequestSkip;
                 view.SetKeyHints(autoKeyHint, speedKeyHint, skipKeyHint, historyKeyHint);
+                view.SetMotion(policy.Settings.Motion);
+                cadence = new DialogueTypingCadence(policy.Settings);
                 long visit = -1;
                 while (generation == rules.Generation && rules.Phase != DialogueSaveData.Phase.Completed &&
                     rules.Phase != DialogueSaveData.Phase.Closed)
@@ -203,8 +210,9 @@ namespace Game.Dialogue
                         float delta = clock.UnscaledDeltaTime;
                         if (rules.Phase == DialogueSaveData.Phase.Typing)
                         {
-                            characterProgress += policy.CharactersPerSecond * delta;
-                            rules.RevealTo((int)characterProgress);
+                            // 预算已乘倍速；标点停顿按字符预算扣，倍速下同比缩短（见 DialogueTypingCadence）。
+                            rules.RevealTo(cadence.Advance(view.VisibleText, rules.VisibleCharacters,
+                                policy.CharactersPerSecond * delta));
                         }
                         if (policy.TickAuto(delta, rules.Phase))
                             Submit(new DialogueIntent(DialogueIntent.Action.Advance, generation, visit));
@@ -247,8 +255,9 @@ namespace Game.Dialogue
                 }
                 finally
                 {
-                    foreach (AssetHandle<Sprite> handle in handles) handle?.Dispose();
-                    Array.Clear(handles, 0, handles.Length);
+                    ReleaseAll(handles);
+                    ReleaseAll(retiring);
+                    ReleaseAll(loading);
                     ReleaseChoiceIcons();
                     choiceRowAvailable.Clear();
                     choiceRowIds.Clear();
@@ -260,6 +269,7 @@ namespace Game.Dialogue
                     presentToken = CancellationToken.None;
                     conditions = null;
                     policy = null;
+                    cadence = null;
                     targetId = null;
                 }
             }
@@ -390,27 +400,55 @@ namespace Game.Dialogue
             // 恢复时使用已解析文本及姓名；内容更新不能改写旧记录。
             bool preparing = rules.Phase == DialogueSaveData.Phase.Preparing;
             int count = view.SetLine(generation, visit, preparing ? speaker : rules.Speaker, rules.Text);
-            characterProgress = 0;
+            cadence.Reset();
             availability = null;
             choiceRowAvailable.Clear(); // SetLine 已清掉界面上的选项行，这里同步清
             choiceRowIds.Clear();
             ReleaseChoiceIcons();
-            for (int slot = 0; slot < handles.Length; slot++)
-            {
-                view.SetPortrait(slot, null, false);
-                handles[slot]?.Dispose();
-                handles[slot] = null;
-            }
+            // 先把本节点的立绘全部加载完（旧图在此期间照常显示），再逐槽交给 View：
+            // View 按「空 → 有 / 有 → 空 / 换图 / 说话状态」自己决定播入场、退场、交叉淡化还是压暗。
+            ReleaseAll(loading);
             foreach (DialogueContent.Portrait portrait in rules.Portraits)
             {
                 AssetHandle<Sprite> handle = await LoadPortraitAsync(portrait, ct);
                 if (generation != rules.Generation || visit != rules.Visit || ct.IsCancellationRequested)
-                { handle?.Dispose(); ct.ThrowIfCancellationRequested(); return; }
-                handles[portrait.Slot] = handle;
-                view.SetPortrait(portrait.Slot, handle?.Asset, portrait.CharacterId == node.SpeakerId || string.IsNullOrEmpty(node.SpeakerId));
+                { handle?.Dispose(); ReleaseAll(loading); ct.ThrowIfCancellationRequested(); return; }
+                loading[portrait.Slot]?.Dispose();
+                loading[portrait.Slot] = handle;
+            }
+            // 存档恢复进来的立绘直接置终态，不播入场。台词节点正常进入必经 Preparing，此刻已是 Typing / AwaitAdvance
+            // 只可能是 Restore；选项节点进入即 AwaitChoice，不能拿「非 Preparing」判恢复，否则选项节点的换表情会被吞掉。
+            bool instant = rules.Phase == DialogueSaveData.Phase.Typing || rules.Phase == DialogueSaveData.Phase.AwaitAdvance;
+            for (int slot = 0; slot < handles.Length; slot++)
+            {
+                AssetHandle<Sprite> handle = loading[slot];
+                // 旁白（节点无 speakerId）时两侧都不是说话者，一并压暗。
+                bool speaking = handle != null && !string.IsNullOrEmpty(node.SpeakerId) &&
+                    SlotCharacter(slot) == node.SpeakerId;
+                view.SetPortrait(slot, handle?.Asset, speaking, instant);
+                retiring[slot]?.Dispose();
+                retiring[slot] = handles[slot];
+                handles[slot] = handle;
+                loading[slot] = null;
             }
             if (preparing) rules.Ready(generation, visit, count, rules.Text, speaker);
             RefreshChoices(true);
+        }
+
+        private string SlotCharacter(int slot)
+        {
+            foreach (DialogueContent.Portrait portrait in rules.Portraits)
+                if (portrait.Slot == slot) return portrait.CharacterId;
+            return null;
+        }
+
+        private static void ReleaseAll(AssetHandle<Sprite>[] slots)
+        {
+            for (int i = 0; i < slots.Length; i++)
+            {
+                slots[i]?.Dispose();
+                slots[i] = null;
+            }
         }
 
         private async UniTask<AssetHandle<Sprite>> LoadPortraitAsync(DialogueContent.Portrait portrait, CancellationToken ct)

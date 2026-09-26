@@ -1,10 +1,15 @@
 // 职责：复用 UIView 展示文字、左右两槽立绘、选项与自动 / 倍速 / 跳过控件；只显示与抛事件，不注入服务，不拥有剧情进度。
 //   键盘 / 手柄：按钮文字后缀键位提示（由 Controller 传入）、选项前缀序号、选项出现后默认选中第一个可用项（UI Submit 可直接选）。
+//   动效（roadmap D1 / D2）：立绘入场 / 退场 / 交叉淡化 / 压暗交给每槽一个 DialoguePortraitSlot；说话者名字变化时名牌 punch。
+//   参数由 Controller 经 SetMotion 传入（View 拿不到 DialogueConfig）；全部 unscaled，对白期间时停也照常播。
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Game.Core.UI;
+using LitMotion;
+using LitMotion.Extensions;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -48,6 +53,13 @@ namespace Game.Dialogue
         // 与 rows 一一对应：该行的选项 id 与图标 Image，异步加载完的图标按选项 id 回填。
         private readonly List<string> rowChoiceIds = new List<string>();
         private readonly List<Image> rowIcons = new List<Image>();
+        // 每槽一个立绘动效状态机，首次打开时按 portraits 建（取预制体原位），之后复用。
+        private DialoguePortraitSlot[] slots;
+        private DialogueMotionSettings motion = DialogueMotionSettings.Default;
+        private MotionHandle namePunch;
+        // 上一句显示的说话者名：变化才 punch，同名连续两句不动；打开面板时清空，第一句必 punch。
+        private string shownSpeaker;
+        private readonly StringBuilder visibleBuilder = new StringBuilder(128);
         private long generation;
         private long visit;
         private bool shownAuto;
@@ -77,6 +89,9 @@ namespace Game.Dialogue
         public event Action OnSpeed;
         public event Action OnSkip;
 
+        /// <summary>当前台词经 TMP 解析后的可见字符序列（富文本标签已去掉，下标与可见字数一一对应），供打字节奏判标点。</summary>
+        public string VisibleText { get; private set; } = string.Empty;
+
         public override UniTask OnOpenAsync(object arg, CancellationToken ct)
         {
             Validate();
@@ -99,7 +114,21 @@ namespace Game.Dialogue
             selectChoiceFrame = -1;
             selectedChoiceId = null;
             ApplyStaticLabels();
+            EnsureSlots();
+            // 面板可能被复用：上一段对白的立绘与名牌动画直接清到终态，第一句从空槽入场、名牌必 punch。
+            foreach (DialoguePortraitSlot slot in slots) slot.Clear();
+            FinishNamePunch();
+            shownSpeaker = null;
+            VisibleText = string.Empty;
             return UniTask.CompletedTask;
+        }
+
+        /// <summary>设置动效参数（Controller 打开面板后调一次）；未设置时用 <see cref="DialogueMotionSettings.Default"/>。</summary>
+        public void SetMotion(in DialogueMotionSettings settings)
+        {
+            motion = settings.IsValid ? settings : DialogueMotionSettings.Default;
+            EnsureSlots();
+            foreach (DialoguePortraitSlot slot in slots) slot.Configure(motion);
         }
 
         /// <summary>
@@ -128,6 +157,11 @@ namespace Game.Dialogue
             generation = session;
             visit = nodeVisit;
             speaker.text = name;
+            if (!string.Equals(shownSpeaker, name, StringComparison.Ordinal))
+            {
+                shownSpeaker = name;
+                PunchName();
+            }
             body.text = text;
             body.maxVisibleCharacters = 0;
             body.ForceMeshUpdate();
@@ -135,18 +169,25 @@ namespace Game.Dialogue
             // 换节点：上一组选项的选中记忆作废（选项 id 可能跨节点重名）。
             selectedChoiceId = null;
             selectChoiceFrame = -1;
-            return body.textInfo.characterCount;
+            TMP_TextInfo info = body.textInfo;
+            visibleBuilder.Clear();
+            for (int i = 0; i < info.characterCount; i++) visibleBuilder.Append(info.characterInfo[i].character);
+            VisibleText = visibleBuilder.ToString();
+            return info.characterCount;
         }
 
         public void SetVisible(int count) => body.maxVisibleCharacters = count;
 
         public void SetInput(bool enabled) => Group.interactable = enabled;
 
-        public void SetPortrait(int slot, Sprite sprite, bool speaking)
+        /// <summary>
+        /// 设置一槽立绘：空 → 有滑入淡入，有 → 空滑出淡出，同槽换图交叉淡化，<paramref name="speaking"/> 为 false 时压暗缩小。
+        /// <paramref name="instant"/> = true 时直接置终态不播动画（存档恢复路径）。
+        /// </summary>
+        public void SetPortrait(int slot, Sprite sprite, bool speaking, bool instant = false)
         {
-            portraits[slot].sprite = sprite;
-            portraits[slot].enabled = sprite != null;
-            portraits[slot].color = speaking ? Color.white : new Color(0.65f, 0.65f, 0.65f, 1f);
+            EnsureSlots();
+            slots[slot].Set(sprite, speaking, instant);
         }
 
         /// <summary>刷新控件：自动标签「自动」/「自动中」，倍速标签 x1 / x2 / x4，跳过中禁用跳过按钮。值没变不重写。</summary>
@@ -223,6 +264,57 @@ namespace Game.Dialogue
             OnSpeed = null;
             OnSkip = null;
             return UniTask.CompletedTask;
+        }
+
+        // 面板停用 / 销毁（含被瞬间关闭）时掐断全部动效并直接摆到终态，避免残影或半透明立绘留在下次打开的画面里。
+        private void OnDisable()
+        {
+            if (slots != null)
+                foreach (DialoguePortraitSlot slot in slots) slot.Finish();
+            FinishNamePunch();
+        }
+
+        private void EnsureSlots()
+        {
+            if (slots != null || portraits == null || portraits.Length != DialogueContent.SlotCount) return;
+            slots = new DialoguePortraitSlot[portraits.Length];
+            // 槽 0 在左、从左侧进出；其余（槽 1）在右、从右侧进出。
+            for (int i = 0; i < portraits.Length; i++)
+            {
+                slots[i] = new DialoguePortraitSlot(portraits[i], i > 0);
+                slots[i].Configure(motion);
+            }
+        }
+
+        // 名牌 punch：从放大 + 透明回落到原样。说话者名 TMP 本身就是名牌（预制体 SpeakerName），不另找底板。
+        private void PunchName()
+        {
+            if (namePunch.IsActive()) namePunch.Cancel();
+            float seconds = motion.NameTagPunchSeconds;
+            if (seconds <= 0f || !isActiveAndEnabled)
+            {
+                ApplyNamePunch(1f);
+                return;
+            }
+            ApplyNamePunch(0f);
+            namePunch = LMotion.Create(0f, 1f, seconds)
+                .WithEase(Ease.OutCubic)
+                .WithScheduler(MotionScheduler.UpdateIgnoreTimeScale)
+                .Bind(this, (t, view) => view.ApplyNamePunch(t))
+                .AddTo(this);
+        }
+
+        private void ApplyNamePunch(float t)
+        {
+            float scale = motion.NameTagPunchScale + (1f - motion.NameTagPunchScale) * t;
+            speaker.rectTransform.localScale = new Vector3(scale, scale, 1f);
+            speaker.alpha = t;
+        }
+
+        private void FinishNamePunch()
+        {
+            if (namePunch.IsActive()) namePunch.Cancel();
+            if (speaker != null) ApplyNamePunch(1f);
         }
 
         // 逐个点名缺失字段，预制体按名字接线时一眼看出漏了哪个。
