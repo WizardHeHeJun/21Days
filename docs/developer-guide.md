@@ -173,7 +173,7 @@ Boot.unity 加载
 - **注册顺序就是初始化顺序**。要调整顺序，改 `GameLifetimeScope.Configure` 里的注册先后，不要在别处加调用。顺序按 `architecture.md` 5.1：Platform → Log → Assets → Config → Save → Input → Audio → UI。
 - **加一个新框架服务** = 实现 `IGameService` + 在 `GameLifetimeScope` 里 `.As<I你的接口, IGameService>()`，别的地方一行不用改。
 - **加一个玩法模块** = 写一个 `GameplayInstaller` 子类，把组件挂到 `GameBootstrap` 物体上。`Game.Core` 不认识任何玩法，所以玩法只能这样把自己接上来（第 7 章有完整流程）。**玩法状态必须注册进根作用域**，不能放玩法场景的子作用域——`GameFlow` 从根 `IObjectResolver` 解析状态类型，而且切进去之前那个场景还没加载。
-- 标题界面的「开始」按钮**不在框架里决定去哪**：`TitleView` 抛 `OnStartClicked` 事件 → `TitleState` 发布 `TitleStartClickedEvent` → 玩法侧的入口点订阅它并 `GoToAsync<自己的状态>()`。没有玩法接进来时点了只留一条日志，不是错误。「继续」「选择存档」同理，分别发布 `TitleContinueClickedEvent` / `TitleLoadClickedEvent`；「继续」置灰调 `TitleView.SetContinueEnabled(false)`。
+- 标题界面的「开始」按钮**不在框架里决定去哪**：`TitleView` 抛 `OnStartClicked` 事件 → `TitleState` 发布 `TitleStartClickedEvent` → 玩法侧的入口点订阅它并 `GoToAsync<自己的状态>()`。没有玩法接进来时点了只留一条日志，不是错误。「继续」「选择存档」同理，分别发布 `TitleContinueClickedEvent` / `TitleLoadClickedEvent`；没有存档时隐藏「继续」调 `TitleView.SetContinueVisible(false)`（竖向布局组，其余按钮自动上移）。
 - 任何一步抛异常都会被 `BootAsync` 捕获、`Log.Error` 后**停止**启动，不会带着半初始化的状态往下跑。退出播放模式引起的 `OperationCanceledException` 不算错误。
 - 玩法场景走 Additive 加载，Boot 场景全程常驻。
 
