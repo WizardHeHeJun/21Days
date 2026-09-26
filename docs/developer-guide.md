@@ -403,6 +403,16 @@ audio.MasterVolume = 0.5f;                      // 立刻生效并写回 Setting
 手感参数在 `Assets/_Project/Data/CharacterPuppet/ChibiPuppetConfig.asset`（起步 / 停步阈值、采样窗口、走路播放速率）。
 Animator 走 unscaled 时间，对话时停期间待机呼吸照播。验证：`/verify-module CharacterPuppet`（`Assets/_Project/Scenes/Verify/CharacterPuppet.unity`）。
 
+### 6.17 任务系统 — QuestService / 任务编辑器
+
+玩法上报进度调 `QuestService.Report(kind, key)`（`kind` 是 `TalkTo` / `ReachLocation` / `Counter`），任务系统按当前
+目标自动判定推进。内容在 `Tables/Data/quest/<编号>.json`，策划配表用菜单 **`21Days` → `策划` → `任务编辑器`**（不用
+直接改 JSON，手改也行）。
+
+编辑期校验在 `Game.Editor.Quest.QuestTableValidator`：菜单 **`21Days` → `配置表` → `生成`** 前自动跑一遍，有错误
+拦生成；独立菜单 **`21Days` → `策划` → `校验任务表`** 只跑校验、不生成。详细字段与常见报错见
+[`quest-module-guide.md`](../ai-docs/docs/modules/quest/quest-module-guide.md) 与 [`designer-guide.md` 第 12 章](designer-guide.md)。
+
 ## 7. 新建玩法模块
 
 > 现有模块的清单、成熟度与接入状态见 [模块总览](modules/README.md)；给策划 / 美术看的逐模块说明也在那个目录，新模块落地后照 `player.md` 的骨架补一份。
@@ -623,7 +633,8 @@ var rules = new SampleRules(config, telemetry.Scope("sample"));
 
 1. 改 `Tables/Data/<表>.xlsx`，保存关掉 Excel（占着文件会让生成失败）。
 2. 跑生成：编辑器里点菜单 **21Days → 配置表 → 生成**，或命令行
-   `powershell -ExecutionPolicy Bypass -File scripts/gen-tables.ps1`。
+   `powershell -ExecutionPolicy Bypass -File scripts/gen-tables.ps1`。生成前会先校验任务表，有错误不生成，
+   Console 是中文 `[配置表] 任务表：…`。
 3. 回 Unity 等刷新完，`/unity-test EditMode` 跑绿。
 4. 提交时**把生成物一起带上**（`Generated/` 的 `.cs` + `.meta`、`Data/Config/` 的 `.bytes` + `.meta`）。
 
@@ -663,6 +674,7 @@ var rules = new SampleRules(config, telemetry.Scope("sample"));
 | Excel 被占用 / IO 异常 | 表还开在 Excel 里，关掉重跑 |
 | 运行时 `配置表 "xxx" 的数据文件没找到` | 代码生成了但 `.bytes` 没进 Addressables 的 Config 组，或者压根没重新生成——重跑 8.2 |
 | 运行时 `标签 "config" 下一个资源都没有` | Addressables 里 `Assets/_Project/Data/Config` 这个条目丢了标签。打开 Window → Asset Management → Addressables → Groups，把 Config 组里那个条目的 Label 勾回 `config` |
+| `[配置表] 任务表：[错误] …` / `任务表有 N 处错误，未生成` | 任务表内容错，打开任务编辑器（`21Days/策划/任务编辑器`）看底部列表改，对照表在策划手册第 12.5 节 |
 
 ## 9. 存档
 

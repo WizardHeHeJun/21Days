@@ -239,3 +239,27 @@
 - 根因：相机偏移 (0, 11.8, −14)，相机→玩家胸口的视线俯角约 40°；离地 2.6 m、南北宽 2.5 m 的桥，在视线方向上挡住的是它**北侧** 2～3 m 的人（桥投影往后落），正下方的人相机从桥南沿下面看得见。
 - 正确做法：遮挡用例先用 `Physics.RaycastAll(相机, 胸口)` 在编辑器里算一遍被挡的站位再写；挡人的位置 ≈ 遮挡物北沿 + (离地高 − 0.8) / tan(俯角)。宽大的甲板（10 m）人站在下方中部确实会被挡。
 - 关联：`Runtime/IsometricExploration/OccluderFadePresenter.cs`、`ExplorationShowcase.Occluder_FadesBridgeWhenPlayerBeneath`。
+
+## 多会话共用一个工作区：别人 `git add` 过的文件会随你的 `git commit` 一起进库
+- 现象：任务编辑器那轮首笔提交混进六个别人暂存的文件（并非本轮改动）。
+- 根因：`git commit` 提交的是整个索引，索引是共享的，不会自动区分「谁 `add` 的」。
+- 正确做法：`git commit -F <信息文件> -- <路径…>` 按路径提交，提交后 `git show --stat` 核对只有自己的文件；已混入且未推送时用 `git reset --soft <基底>` 再按路径重建，别人的文件会回到已暂存状态，不会丢。
+- 关联：`docs/commit-convention.md #多会话共用工作区`、`ai-docs/project-guide.md` 硬规则第 4 条；2026-09-26 任务编辑器那轮。
+
+## Write 工具整份重写 Markdown 会把换行变成 CRLF
+- 现象：`git diff` 警告 `CRLF will be replaced`，整份文件每一行都带 `\r`。
+- 根因：Write 工具整份重写已有文件时按平台行为写入换行符，与仓库既有 LF 不一致。
+- 正确做法：已有文件一律用 Edit 局部改，不用 Write 整份重写；写完 `tr -cd '\r' < <文件> | wc -c` 应为 0；不小心变了用 Python `data.replace(b"\r\n", b"\n")` 转回再存盘。
+- 关联：`docs/designer-guide.md` 曾被整份重写变成 CRLF；2026-09-26 任务编辑器那轮。
+
+## MCP `execute_menu_item` 会把菜单项执行两遍
+- 现象：调一次 `execute_menu_item` 执行某菜单项，Console 里出现两份完全相同的输出。
+- 根因：MCP 工具本身的行为（未定位到具体原因），与被调用菜单项的代码无关。
+- 正确做法：验证菜单行为时按「结果会出现两遍」去看，不要当成代码 bug 去加去重；要精确验证一次调用的效果就用 `execute_code` 直接调那段静态方法。
+- 关联：`.claude/skills/unity-mcp/SKILL.md`；2026-09-26 任务编辑器那轮验证「校验任务表」菜单时发现。
+
+## Luban 生成物内容相同时不重写文件，`.bytes` 时间戳不变
+- 现象：`TryGenerate` 返回成功，Console 也有「生成完成，资产已刷新」，但 `quest_tbquest.bytes` 的 mtime 没变。
+- 根因：Luban 生成时内容与磁盘上已有文件相同就不重写，是生成器的正常行为，不是生成失败。
+- 正确做法：判断「这次生成跑过」看 Console 的「生成完成，资产已刷新」，不要看文件时间戳；要验证内容确实变了，就先改一处表数据再生成对比。
+- 关联：`Assets/_Project/Scripts/Editor/Config/GenerateTablesMenu.cs`；2026-09-26 任务编辑器那轮 T5 实测。

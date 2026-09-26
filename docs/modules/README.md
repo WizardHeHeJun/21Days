@@ -14,7 +14,7 @@
 | Taming | 按键驯服敌人并在玩家与敌人之间切换操控和镜头 | 原型 | 未挂（只在 `Verify/Taming.unity`） | [taming.md](taming.md) | [taming-module-guide.md](../../ai-docs/docs/modules/taming/taming-module-guide.md) | 无（借用 Player / Monster 的 SO） |
 | CharacterPuppet | 分件拼成的 Q 版小人，按位移演待机 / 走路并左右翻面，不参与玩法 | 可用（美术占位） | 场景级 | [characterpuppet.md](characterpuppet.md) | [characterpuppet-module-guide.md](../../ai-docs/docs/modules/characterpuppet/characterpuppet-module-guide.md) | SO `Data/CharacterPuppet/ChibiPuppetConfig.asset`、美术目录 `Art/Sprites/Characters/Puppet/` |
 | Dialogue | 走近 NPC 拉起对话：世界时停、立绘、条件选项、自动 / 倍速 / 跳过 / 历史；路人只冒头顶闲话气泡 | 可用 | 已挂 Boot | [dialogue.md](dialogue.md) | [dialogue-module-guide.md](../../ai-docs/docs/modules/dialogue/dialogue-module-guide.md) | 表 `Tables/Data/dialogue/`、`dialogue_character.json`，SO `Data/Dialogue/DialogueConfig.asset` |
-| Quest | 主线 / 支线按前置自动接取、目标按顺序推进；任务栏、面板、追踪、头顶标记与画面边缘箭头 | 可用 | 已挂 Boot | [quest.md](quest.md) | [quest-module-guide.md](../../ai-docs/docs/modules/quest/quest-module-guide.md) | 表 `Tables/Data/quest/`，SO `Data/Quest/QuestConfig.asset` |
+| Quest | 主线 / 支线按前置自动接取、目标按顺序推进；任务栏、面板、追踪、头顶标记与画面边缘箭头 | 可用 | 已挂 Boot | [quest.md](quest.md) | [quest-module-guide.md](../../ai-docs/docs/modules/quest/quest-module-guide.md) | 表 `Tables/Data/quest/`（编辑器 `21Days/策划/任务编辑器`），SO `Data/Quest/QuestConfig.asset` |
 | Narrative | 事件驱动的剧情阶段迁移与遭遇仲裁，只有纯规则层 | 原型 | 未挂 | [narrative.md](narrative.md) | [narrative-module-guide.md](../../ai-docs/docs/modules/narrative/narrative-module-guide.md) | 无 |
 | Sample | 端到端跑通框架每一层的样板模块，给程序照抄用 | 样板 | 未挂 | 无（策划不用管） | [sample-module-guide.md](../../ai-docs/docs/modules/sample/sample-module-guide.md) | SO `Data/Sample/SampleConfig.asset` |
 

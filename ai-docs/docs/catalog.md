@@ -28,7 +28,7 @@ Claude Code 从 `CLAUDE.md`、Codex 从 `AGENTS.md` 进入，共同读取 [项�
 | IsometricExploration | 三件套齐备；确定性潜行战斗接入等距纸片场景 | [`modules/isometricexploration/`](modules/isometricexploration/isometricexploration-module-guide.md) |
 | Dialogue | 三件套齐备；Unity 接线已完成，视觉验收待开发者跑 /verify-module | [`modules/dialogue/`](modules/dialogue/dialogue-module-guide.md) |
 | CharacterPuppet | 三件套齐备；拼接小人待机 / 走路表现，已替换 SampleScene 玩家与巡逻者纸片 | [`modules/characterpuppet/`](modules/characterpuppet/characterpuppet-module-guide.md) |
-| Quest | 三件套齐备；Unity 接线完成，回放 3 条 PASS，视觉验收由开发者持续跟进 | [`modules/quest/`](modules/quest/quest-module-guide.md) |
+| Quest | 三件套齐备；Unity 接线完成；策划侧有任务编辑器与编辑期校验（`Scripts/Editor/Quest/`）；回放 3 条 PASS，视觉验收由开发者持续跟进 | [`modules/quest/`](modules/quest/quest-module-guide.md) |
 | Narrative | 纯规则层（seed），未接 Unity；三件套已生成 | [`modules/narrative/`](modules/narrative/narrative-module-guide.md) |
 | Loot | 三件套齐备；物资箱拾取 / 奖励 / 背包分区，SampleScene 已接三只箱子，回放见波 4 | [`modules/loot/`](modules/loot/loot-module-guide.md) |
 
@@ -85,6 +85,7 @@ Sample 是端到端跑通框架每一层的样板模块（配置表 → 纯 C# �
 | harness 行为回归用例 | [`evals/README.md`](../../evals/README.md) |
 | 跑行为 eval（改完规则验 AI 行为有没有真变） | [`.claude/skills/run-evals/SKILL.md`](../../.claude/skills/run-evals/SKILL.md)（`/run-evals`） |
 | 工程跨文件静态不变量（asmdef 方向 / 平台宏 / 命名空间 / `.meta` / UI 地址） | [`.claude/skills/evolution/invariants.py`](../../.claude/skills/evolution/invariants.py)（`/gc` 第 5 项自动跑） |
+| 策划配任务 / 校验任务表（编辑器窗口、生成前拦截） | 菜单 `21Days/策划/任务编辑器`、`21Days/策划/校验任务表`，代码 `Assets/_Project/Scripts/Editor/Quest/`，用法 [`docs/designer-guide.md`](../../docs/designer-guide.md) 第 12 章，设计 [`PRP/quest-editor/prp.md`](../../PRP/quest-editor/prp.md) |
 
 ## 三类资产的区别（别混）
 
