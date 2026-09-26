@@ -22,6 +22,8 @@ maturity: seed
 
 ## 新增一条任务
 
+编辑器：菜单 `21Days/策划/任务编辑器`（`Game.Editor.Quest.QuestEditorWindow`），「保存并生成」一步完成下面 1–3 步，且 4 的校验在编辑期就会报出全部问题。
+
 1. 在 `Tables/Data/quest/` 新建 `<id>.json`（文件名 = id），照 `1001.json` 的形状写。**每个字段都要写**：
    `prerequisites`（空写 `[]`）、`objectives` 每项的 `count`（1 起）、`location`（空写 `""`）。
 2. `kind` 主线 (`Main`) 同一时刻只有一条会被激活；要接在某条主线后面，把它的 id 填进后续主线的 `prerequisites`。

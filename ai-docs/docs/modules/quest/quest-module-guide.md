@@ -127,6 +127,9 @@ maturity: seed
 目标为空、前置成环、TalkTo 键非整数、ReachLocation 键为空、TalkTo 对话不存在）在首次访问 `QuestCatalog.Content`
 时抛 `ArgumentException`，不落缓存；`QuestService.InitializeAsync` 捕获后记 Error，服务保持 `IsReady == false`。
 
+编辑期校验入口 `Game.Editor.Quest.QuestTableValidator`（聚合报全部问题，交叉校验对话编号 / 场景地点键 / 计数键，
+最后用 `QuestContent` 兜底），`GenerateTablesMenu.TryGenerate` 生成前自动跑，有 Error 不生成；错误文案里的目标序号从 1 起。
+
 ## 测试与验证
 
 | 类型 | 位置 | 覆盖 |
