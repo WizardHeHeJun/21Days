@@ -9,8 +9,17 @@ namespace Game.Monster
     public sealed class EncounterSceneView : MonoBehaviour
     {
         private const float MinFlipDelta = 0.0001f;
+        // 波 12：调试面板挪到左下角像素坐标（不随画布缩放），让出右上角给沉浸 / 重置按钮与对话三键。
         private const float DebugPanelMargin = 16f;
         private const float DebugPanelWidth = 480f;
+        private const float BackButtonWidth = 114f;
+        private const float BackButtonHeight = 40f;
+        private const float LineHeight = 28f;
+        private const float AlertBarWidth = 208f;
+        private const float AlertBarOuterHeight = 20f;
+        private const float AlertBarInnerHeight = 12f;
+        private const float AlertBarPadding = 4f;
+        private const float AlertBarGapAboveLines = 24f;
 
         [SerializeField] private Transform playerSpawn;
         [SerializeField] private Transform[] patrolPoints;
@@ -57,7 +66,6 @@ namespace Game.Monster
         private MonsterMode lastMode = (MonsterMode)255;
         private bool lastSneaking;
         private bool lastDisguised;
-        private GUIStyle rightAlignedLabel;
 
         public event Action OnBackClicked;
 
@@ -309,26 +317,26 @@ namespace Game.Monster
             renderer.flipX = EncounterProjection.ResolveFlipX(previousX, currentX, renderer.flipX, MinFlipDelta);
         }
 
+        // 波 12：调试块挪到左下角，把右上角一列让给沉浸 / 重置按钮与对话三键（DialogueView.Controls）。
+        // Time.timeScale <= 0f（对白 / 面板暂停期间）整块不画，避免压在对话框或暂停面板上。
         private void OnGUI()
         {
-            if (player == null || monster == null)
+            if (player == null || monster == null || Time.timeScale <= 0f)
             {
                 return;
             }
 
-            // 波 9：调试文字挪到右上「返回标题」按钮下方、右对齐，让出左上角给任务栏 HUD。
-            if (rightAlignedLabel == null)
-            {
-                rightAlignedLabel = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperRight };
-            }
+            float buttonTop = Screen.height - DebugPanelMargin - BackButtonHeight;
+            float line2Top = buttonTop - LineHeight;
+            float line1Top = line2Top - LineHeight;
+            float alertTop = line1Top - AlertBarGapAboveLines;
 
-            float left = Screen.width - DebugPanelMargin - DebugPanelWidth;
-            float right = Screen.width - DebugPanelMargin;
-            GUI.Label(new Rect(left, 64f, DebugPanelWidth, 28f), playerStatus, rightAlignedLabel);
-            GUI.Label(new Rect(left, 92f, DebugPanelWidth, 28f), monsterStatus, rightAlignedLabel);
-            GUI.Box(new Rect(right - 208f, 124f, 208f, 20f), string.Empty);
-            GUI.Box(new Rect(right - 204f, 128f, 200f * monster.Alert, 12f), string.Empty);
-            if (GUI.Button(new Rect(Screen.width - 130f, 16f, 114f, 40f), "返回标题"))
+            GUI.Box(new Rect(DebugPanelMargin, alertTop, AlertBarWidth, AlertBarOuterHeight), string.Empty);
+            GUI.Box(new Rect(DebugPanelMargin + AlertBarPadding, alertTop + AlertBarPadding,
+                (AlertBarWidth - AlertBarPadding * 2f) * monster.Alert, AlertBarInnerHeight), string.Empty);
+            GUI.Label(new Rect(DebugPanelMargin, line1Top, DebugPanelWidth, LineHeight), playerStatus);
+            GUI.Label(new Rect(DebugPanelMargin, line2Top, DebugPanelWidth, LineHeight), monsterStatus);
+            if (GUI.Button(new Rect(DebugPanelMargin, buttonTop, BackButtonWidth, BackButtonHeight), "返回标题"))
             {
                 OnBackClicked?.Invoke();
             }
