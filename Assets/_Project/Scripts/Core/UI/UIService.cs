@@ -34,6 +34,8 @@ namespace Game.Core.UI
     ///   Canvas_Top   (sortingOrder 300) → SafeArea
     ///   EventSystem
     /// </code>
+    /// Hud 层的 SafeArea 上额外挂一个 CanvasGroup：Panel 栈里有任一全屏面板时整层被盖住（alpha 0、不吃点击），
+    /// 见 <see cref="RefreshHudCover"/>。
     /// </para>
     /// </summary>
     public sealed class UIService : IUIService, IHudVisibility, IGameService, IDisposable
@@ -81,6 +83,17 @@ namespace Game.Core.UI
 
         /// <summary>当前是否沉浸（<see cref="SetHudHidden"/>）。</summary>
         private bool hudHidden;
+
+        /// <summary>
+        /// 「被全屏面板盖住」的整层开关：挂在 Canvas_Hud/SafeArea 上的 CanvasGroup，由 <see cref="RefreshHudCover"/> 驱动。
+        /// 与另外两套 Hud 显隐互不干扰、可叠加：<see cref="SetLayerVisible"/> 切的是 Canvas.enabled（演出模块在用），
+        /// 沉浸模式（<see cref="SetHudHidden"/>）动的是每个 Hud 面板自己根上的 CanvasGroup。
+        /// 没初始化（EditMode 测试）时为 null，盖住逻辑整体跳过。
+        /// </summary>
+        private CanvasGroup hudCoverGroup;
+
+        /// <summary><see cref="hudCoverGroup"/> 当前是否处于盖住状态，状态不变时不重复写。</summary>
+        private bool hudCovered;
 
         /// <summary>
         /// 两个埋点参数与 <paramref name="hudChanged"/> 允许为 null（EditMode 测试里直接 new 出来的 UIService 没有容器）：
@@ -250,6 +263,9 @@ namespace Game.Core.UI
 
             ApplyVisibility(stack.Push(view), false);
 
+            // 全屏面板一压栈 Hud 立刻盖住，不等淡入。
+            RefreshHudCover();
+
             // 沉浸中新开的 Hud 面板：不播淡入（淡入会把 alpha 拉回 1），直接套隐藏。
             if (hudHidden && FollowsHud(view))
             {
@@ -300,6 +316,9 @@ namespace Game.Core.UI
 
             opened.Remove(type);
             ApplyVisibility(stack.Remove(view), true);
+
+            // 放在淡出之后：面板淡出完成、出栈了 Hud 才恢复，不会在淡出途中透出任务栏。
+            RefreshHudCover();
 
             if (wasTop)
             {
@@ -424,6 +443,7 @@ namespace Game.Core.UI
             layerRoots.Clear();
             layerCanvases.Clear();
             eventSystem = null;
+            hudCoverGroup = null;
 
             if (root != null)
             {
@@ -512,6 +532,12 @@ namespace Game.Core.UI
             contentObject.layer = canvasObject.layer;
             StretchToParent(contentObject.transform as RectTransform);
             contentObject.AddComponent<SafeAreaFitter>();
+
+            if (layer == UILayer.Hud)
+            {
+                // 整层盖住开关，含义见 hudCoverGroup 的注释。
+                hudCoverGroup = contentObject.AddComponent<CanvasGroup>();
+            }
 
             layerRoots[layer] = contentObject.transform;
             layerCanvases[layer] = canvas;
@@ -659,6 +685,30 @@ namespace Game.Core.UI
                     view.gameObject.SetActive(visible);
                 }
             }
+        }
+
+        /// <summary>
+        /// 按 Panel 栈同步 Hud 层的整层盖住：有任一全屏面板就 alpha 0 且不吃点击，全关掉后恢复。
+        /// 只动 <see cref="hudCoverGroup"/>，不 SetActive 任何 Hud 面板，也不碰沉浸状态与 Canvas.enabled。
+        /// </summary>
+        private void RefreshHudCover()
+        {
+            // CanvasGroup 是 UnityEngine.Object，判空只用 == null。
+            if (hudCoverGroup == null)
+            {
+                return;
+            }
+
+            bool covered = stack.HasFullScreenPanel;
+            if (covered == hudCovered)
+            {
+                return;
+            }
+
+            hudCovered = covered;
+            hudCoverGroup.alpha = covered ? 0f : 1f;
+            hudCoverGroup.interactable = !covered;
+            hudCoverGroup.blocksRaycasts = !covered;
         }
 
         /// <summary>该面板是否随沉浸模式隐藏：Hud 层且没声明「沉浸中仍显示」。</summary>

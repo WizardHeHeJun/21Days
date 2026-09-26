@@ -884,6 +884,8 @@ public sealed class PlayerMovement          // 表现层 MonoBehaviour 或纯 C#
 | `Popup` | 确认框、飘窗 | 是，可叠加，互不隐藏，也不影响 Panel |
 | `Top` | 加载遮罩、转圈、调试台 | 否，永远在最上面 |
 
+Panel 栈里只要有全屏面板，整个 `Hud` 层就被盖住（`Canvas_Hud/SafeArea` 上的 CanvasGroup 置 alpha 0、不吃点击，Hud 面板本身不 `SetActive`），全屏面板全部关掉（淡出完成）后恢复；它和沉浸模式、`SetLayerVisible` 各管一套开关，互不干扰。
+
 `CloseTopAsync()` 先看 Popup 再看 Panel；`Hud` / `Top` 不进栈，所以返回键关不掉它们。规则本身写在纯 C# 的 `UIStack` 里，有 `UIStackTests` 钉着——改规则先改测试。
 
 ### 11.3 过渡动画
